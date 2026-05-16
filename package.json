@@ -39,6 +39,7 @@
     "type-check": "tsc --noEmit",
     "check": "biome check . && bun run type-check",
     "check:fix": "biome check --write . && bun run type-check",
+    "postinstall": "sh scripts/pape-house-patch-mcp-core.sh",
     "prepublishOnly": "bun run build",
     "docker:build": "docker build -t n24q02m/better-email-mcp:latest .",
     "docker:push": "docker push n24q02m/better-email-mcp:latest",
@@ -58,7 +59,7 @@
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@n24q02m/mcp-core": "git+https://github.com/nick-pape/mcp-core.git#1.14.0-pape.1",
+    "@n24q02m/mcp-core": "1.14.0",
     "html-to-text": "^10.0.0",
     "imapflow": "^1.3.3",
     "mailparser": "^3.9.8",
