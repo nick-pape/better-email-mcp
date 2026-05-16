@@ -251,8 +251,20 @@ export async function startHttp(): Promise<void> {
     // middleware below, keyed by JWT ``sub``). If the scope is absent (not
     // a /mcp request) we fall back to the single-user closure loaded at
     // startup.
+    //
+    // pape-house fork: upstream uses ``scope?.accounts ?? currentAccounts``
+    // which falls through to ``currentAccounts`` only when scope is
+    // null/undefined. But ``authScope`` always sets scope (with
+    // ``accounts: []`` when ``credStore.load(sub)`` returns null), so an
+    // empty-array scope wins over ``currentAccounts`` from disk. After an
+    // email-mcp container restart, every previously-issued JWT then sees
+    // an empty mailbox list even though disk-persisted accounts exist.
+    // Length-check fallback makes the disk-loaded accounts authoritative
+    // when the per-sub in-memory store is empty. Safe for our single-user
+    // deployment; would break per-sub multi-tenancy (acceptable trade —
+    // documented in PAPE_HOUSE_PATCHES.md).
     const scope = subjectContext.getStore()
-    const accountsForThisRequest = scope?.accounts ?? currentAccounts
+    const accountsForThisRequest = scope?.accounts?.length ? scope.accounts : currentAccounts
     const server = new Server(
       { name: `@n24q02m/${SERVER_NAME}`, version: '0.0.0' },
       { capabilities: { tools: {}, resources: {} } }
