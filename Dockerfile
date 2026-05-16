@@ -10,6 +10,10 @@ WORKDIR /app
 
 # Copy package files
 COPY package.json bun.lock ./
+# pape-house fork: postinstall hook references scripts/ — copy it before
+# `bun install` runs so the patch script is reachable. Without this the
+# install fails with "sh: scripts/... not found" (exit 127 → bun exit 2).
+COPY scripts/pape-house-patch-mcp-core.sh ./scripts/
 
 # Install dependencies
 RUN bun install --frozen-lockfile
