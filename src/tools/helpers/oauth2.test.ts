@@ -808,31 +808,22 @@ describe('saveTokens edge cases', () => {
     expect(Object.keys(written)).toEqual(['user@outlook.com'])
   })
 
-  it('uses cached token store on subsequent saves', () => {
+  it('merges with what is on disk, not a stale cache (pape-house fork)', () => {
+    const tokens1: OAuth2Tokens = { accessToken: 'at1', refreshToken: 'rt1', expiresAt: 1000, clientId: 'cid' }
+    const graph: OAuth2Tokens = { accessToken: 'g', refreshToken: 'grt', expiresAt: 3000, clientId: 'cid' }
+    const tokens2: OAuth2Tokens = { accessToken: 'at2', refreshToken: 'rt2', expiresAt: 2000, clientId: 'cid' }
+
     mockExistsSync.mockReturnValue(false)
-
-    const tokens1: OAuth2Tokens = {
-      accessToken: 'at1',
-      refreshToken: 'rt1',
-      expiresAt: 1000,
-      clientId: 'cid'
-    }
-    const tokens2: OAuth2Tokens = {
-      accessToken: 'at2',
-      refreshToken: 'rt2',
-      expiresAt: 2000,
-      clientId: 'cid'
-    }
-
-    // First save populates cache
     saveTokens('first@outlook.com', tokens1)
-    // Second save should use cache, not read from disk
-    saveTokens('second@outlook.com', tokens2)
 
-    // readFileSync should NOT be called for second save (cache is used)
-    const written = JSON.parse(mockWriteFileSync.mock.calls[1]![1] as string)
-    expect(written['first@outlook.com']).toEqual(tokens1)
-    expect(written['second@outlook.com']).toEqual(tokens2)
+    // Another writer (other process / module instance) adds an entry on disk.
+    mockExistsSync.mockReturnValue(true)
+    mockReadFileSync.mockReturnValue(JSON.stringify({ 'first@outlook.com': tokens1, 'graph:first@outlook.com': graph }))
+    saveTokens('first@outlook.com', tokens2)
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls.at(-1)![1] as string)
+    expect(written['first@outlook.com']).toEqual(tokens2)
+    expect(written['graph:first@outlook.com']).toEqual(graph)
   })
 })
 

@@ -139,6 +139,14 @@ attendees, so events never email invitations. New Graph sign-ins add
 `Calendars.ReadWrite`, `Calendars.ReadWrite.Shared`, `Contacts.ReadWrite`.
 `graphRequest` gained an `extraHeaders` arg (Prefer: outlook.timezone).
 
+## Patch 6 — token store merges with disk (pape.7)
+
+`oauth2.ts`: upstream cached tokens.json forever and wrote the whole cache
+back on every save, so a stale writer overwrote newer entries (a completed
+Graph sign-in vanished minutes later). Reads now reload when the file's mtime
+changes; saves read-merge-write. One upstream test asserted the old cache
+behaviour and was replaced with a merge test.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
@@ -180,7 +188,7 @@ unlikely.
 docker build -t registry.pape.house/local/email-mcp:1.29.0-pape.2 \
              --target http \
              -f Dockerfile .
-docker push registry.pape.house/local/email-mcp:1.29.0-pape.6
+docker push registry.pape.house/local/email-mcp:1.29.0-pape.7
 ```
 
 Pin downstream consumers by `sha256:<digest>`, not by tag — Zot tag

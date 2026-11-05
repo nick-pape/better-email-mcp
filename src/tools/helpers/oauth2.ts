@@ -6,7 +6,7 @@
  * persistent token storage, and automatic token refresh.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -100,54 +100,69 @@ export function getClientId(): string {
  * Load stored OAuth2 tokens for an email account.
  * Returns null if no tokens are stored.
  */
-/** In-memory cache for loaded tokens to avoid synchronous file I/O on every call */
+/**
+ * In-memory cache of tokens.json, keyed to the file's mtime (pape-house fork).
+ *
+ * Upstream cached the whole file forever and wrote the cache back on every
+ * save, so a writer holding a stale cache (another module instance, another
+ * process such as a CLI auth run) silently overwrote newer tokens, e.g. a
+ * fresh Graph sign-in lost to the next IMAP refresh. Now reads re-load when
+ * the file changed, and saves merge into what's on disk.
+ */
 let cachedTokenStore: TokenStore | null = null
+let cachedMtimeMs = -1
 
 /** Exposed for testing */
 export function _resetTokenCache(): void {
   cachedTokenStore = null
+  cachedMtimeMs = -1
+}
+
+function fileMtimeMs(): number {
+  try {
+    return statSync(TOKEN_FILE).mtimeMs
+  } catch {
+    return -1
+  }
+}
+
+function readStoreFromDisk(): TokenStore {
+  try {
+    if (existsSync(TOKEN_FILE)) return JSON.parse(readFileSync(TOKEN_FILE, 'utf-8')) as TokenStore
+  } catch {
+    // Corrupted file: treat as empty rather than crash
+  }
+  return {}
 }
 
 export async function loadStoredTokens(email: string): Promise<OAuth2Tokens | null> {
   try {
-    if (cachedTokenStore) {
-      return cachedTokenStore[email.toLowerCase()] || null
+    const mtime = fileMtimeMs()
+    if (!cachedTokenStore || mtime !== cachedMtimeMs) {
+      const data = await readFile(TOKEN_FILE, 'utf-8')
+      cachedTokenStore = JSON.parse(data) as TokenStore
+      cachedMtimeMs = mtime
     }
-
-    const data = await readFile(TOKEN_FILE, 'utf-8')
-    const store: TokenStore = JSON.parse(data)
-    cachedTokenStore = store
-    return store[email.toLowerCase()] || null
-  } catch (err: unknown) {
-    if (err && typeof err === 'object' && 'code' in err && err.code !== 'ENOENT') {
-      // Ignore parse errors or other issues, return null
-    }
+    return cachedTokenStore[email.toLowerCase()] || null
+  } catch {
+    // Missing or unparsable file: no tokens
     return null
   }
 }
 
 /**
- * Persist OAuth2 tokens to disk.
- * Creates config directory if needed. File permissions: 0600.
+ * Persist OAuth2 tokens to disk: read-merge-write so entries written by
+ * anyone else since our last read survive. File permissions: 0600.
  */
 export function saveTokens(email: string, tokens: OAuth2Tokens): void {
   if (!existsSync(CONFIG_DIR)) {
     mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
   }
-
-  let store: TokenStore = cachedTokenStore || {}
-  try {
-    if (!cachedTokenStore && existsSync(TOKEN_FILE)) {
-      store = JSON.parse(readFileSync(TOKEN_FILE, 'utf-8'))
-    }
-  } catch {
-    // Start fresh if file is corrupted
-    store = {}
-  }
-
+  const store = readStoreFromDisk()
   store[email.toLowerCase()] = tokens
-  cachedTokenStore = store
   writeFileSync(TOKEN_FILE, JSON.stringify(store, null, 2), { mode: 0o600 })
+  cachedTokenStore = store
+  cachedMtimeMs = fileMtimeMs()
 }
 
 /**
