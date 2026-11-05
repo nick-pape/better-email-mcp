@@ -131,6 +131,14 @@ register the new actions.
   (`<hr>` + `divRplyFwdMsg`), and `update` replaces only the text above the
   quote. pape.4's update replaced the whole body and dropped the quote.
 
+## Patch 5 — calendar (pape.6)
+
+`calendar` tool over Graph: `list`, `events`, `create_event`, `update_event`,
+`delete_event`. Calendars by name, local times (America/Chicago default). No
+attendees, so events never email invitations. New Graph sign-ins add
+`Calendars.ReadWrite`, `Calendars.ReadWrite.Shared`, `Contacts.ReadWrite`.
+`graphRequest` gained an `extraHeaders` arg (Prefer: outlook.timezone).
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
@@ -172,7 +180,7 @@ unlikely.
 docker build -t registry.pape.house/local/email-mcp:1.29.0-pape.2 \
              --target http \
              -f Dockerfile .
-docker push registry.pape.house/local/email-mcp:1.29.0-pape.5
+docker push registry.pape.house/local/email-mcp:1.29.0-pape.6
 ```
 
 Pin downstream consumers by `sha256:<digest>`, not by tag — Zot tag

@@ -20,6 +20,7 @@ import {
 import { buildOpenRelayHandler } from '@n24q02m/mcp-core'
 import { getSetupUrl, getState } from '../credential-state.js'
 import { type AttachmentsInput, attachments } from './composite/attachments.js'
+import { type CalendarInput, calendar } from './composite/calendar.js'
 import { type ConfigInput, handleConfig } from './composite/config.js'
 import { type DraftsInput, drafts } from './composite/drafts.js'
 import { type FoldersInput, folders } from './composite/folders.js'
@@ -51,7 +52,8 @@ const RESOURCES = [
   { uri: 'email://docs/help', name: 'Help Tool Docs', file: 'help.md' },
   { uri: 'email://docs/config', name: 'Config Tool Docs', file: 'config.md' },
   { uri: 'email://docs/rules', name: 'Rules Tool Docs', file: 'rules.md' },
-  { uri: 'email://docs/drafts', name: 'Drafts Tool Docs', file: 'drafts.md' }
+  { uri: 'email://docs/drafts', name: 'Drafts Tool Docs', file: 'drafts.md' },
+  { uri: 'email://docs/calendar', name: 'Calendar Tool Docs', file: 'calendar.md' }
 ]
 
 /**
@@ -297,6 +299,42 @@ const TOOLS = [
     }
   },
   {
+    name: 'calendar',
+    description:
+      'Outlook calendars (Microsoft Graph), including calendars shared with you. Calendars are chosen by NAME (e.g. "Pape family calendar"); omitted = your default calendar. Times are local wall-clock, America/Chicago unless time_zone is set.\n\nActions (required params -> optional):\n- list: calendars with name, can_edit, owner\n- events (-> calendar, start=today, end=start+14d, limit=50): events in a range; start/end as YYYY-MM-DD or YYYY-MM-DDTHH:MM\n- create_event (subject, start, end -> calendar, all_day, location, body, show_as, reminder_minutes, time_zone)\n- update_event (event_id -> any create field; start and end together)\n- delete_event (event_id)\n\nTimed: start/end "2026-11-13T13:30". All-day: all_day=true, start/end dates, end EXCLUSIVE (one day = start + 1). No attendees: events never send invitations.',
+    annotations: {
+      title: 'Calendar',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['list', 'events', 'create_event', 'update_event', 'delete_event'],
+          description: 'Action to perform'
+        },
+        account: { type: 'string', description: 'Account email (optional with a single account)' },
+        calendar: { type: 'string', description: 'Calendar name (from list); omitted = default calendar' },
+        start: { type: 'string', description: 'YYYY-MM-DD or YYYY-MM-DDTHH:MM (local)' },
+        end: { type: 'string', description: 'YYYY-MM-DD or YYYY-MM-DDTHH:MM (local); all-day end is exclusive' },
+        limit: { type: 'number', description: 'Max events (events action, default 50)' },
+        event_id: { type: 'string', description: 'Event id (update/delete)' },
+        subject: { type: 'string', description: 'Event title' },
+        location: { type: 'string' },
+        body: { type: 'string', description: 'Notes (plain text)' },
+        all_day: { type: 'boolean' },
+        time_zone: { type: 'string', description: 'IANA zone, default America/Chicago' },
+        show_as: { type: 'string', enum: ['free', 'tentative', 'busy', 'oof', 'workingElsewhere'] },
+        reminder_minutes: { type: 'number', description: 'Minutes before start; -1 = no reminder' }
+      },
+      required: ['action']
+    }
+  },
+  {
     name: 'config__open_relay',
     description:
       'Open the relay configuration form for better-email-mcp in the user browser. Returns the relay URL, whether the browser launched, and the current credential state. Auto-respawns the daemon if it has died.',
@@ -324,7 +362,7 @@ const TOOLS = [
       properties: {
         tool_name: {
           type: 'string',
-          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'rules', 'drafts', 'help'],
+          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'rules', 'drafts', 'calendar', 'help'],
           description: 'Tool to get documentation for'
         }
       },
@@ -343,7 +381,7 @@ async function handleHelp(args: unknown): Promise<{ tool: string; documentation:
     throw new EmailMCPError(
       `Invalid tool name: ${toolName}`,
       'VALIDATION_ERROR',
-      'Valid: messages, folders, attachments, send, config, rules, drafts, help'
+      'Valid: messages, folders, attachments, send, config, rules, drafts, calendar, help'
     )
   }
   const resource = RESOURCES.find((r) => r.uri === `email://docs/${toolName}`)
@@ -368,6 +406,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   config: (accounts, args) => handleConfig(accounts, args as unknown as ConfigInput),
   rules: (accounts, args) => rules(accounts, args as unknown as RulesInput),
   drafts: (accounts, args) => drafts(accounts, args as unknown as DraftsInput),
+  calendar: (accounts, args) => calendar(accounts, args as unknown as CalendarInput),
   help: (_, args) => handleHelp(args)
 }
 
