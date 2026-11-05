@@ -84,7 +84,7 @@ function createMockServerWithHandlers() {
 }
 
 describe('ListToolsRequestSchema handler', () => {
-  it('should return exactly 8 tools with correct names', async () => {
+  it('should return exactly 9 tools with correct names', async () => {
     const { getHandler } = createMockServerWithHandlers()
     const handler = getHandler(ListToolsRequestSchema)
 
@@ -92,9 +92,19 @@ describe('ListToolsRequestSchema handler', () => {
 
     const result = await handler({})
 
-    expect(result.tools).toHaveLength(8)
+    expect(result.tools).toHaveLength(9)
     const names = result.tools.map((t: any) => t.name)
-    expect(names).toEqual(['messages', 'folders', 'attachments', 'send', 'config', 'rules', 'config__open_relay', 'help'])
+    expect(names).toEqual([
+      'messages',
+      'folders',
+      'attachments',
+      'send',
+      'config',
+      'rules',
+      'drafts',
+      'config__open_relay',
+      'help'
+    ])
   })
 })
 
@@ -107,7 +117,7 @@ describe('ListResourcesRequestSchema handler', () => {
 
     const result = await handler({})
 
-    expect(result.resources).toHaveLength(7)
+    expect(result.resources).toHaveLength(8)
 
     const expectedUris = [
       'email://docs/messages',
@@ -116,7 +126,8 @@ describe('ListResourcesRequestSchema handler', () => {
       'email://docs/send',
       'email://docs/help',
       'email://docs/config',
-      'email://docs/rules'
+      'email://docs/rules',
+      'email://docs/drafts'
     ]
 
     for (const resource of result.resources) {

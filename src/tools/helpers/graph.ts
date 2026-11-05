@@ -23,11 +23,26 @@ import { getClientId, loadStoredTokens, type OAuth2Tokens, saveTokens } from './
 const AUTH_BASE = 'https://login.microsoftonline.com/consumers/oauth2/v2.0'
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0'
 
+/** Requested on a new sign-in. Mail.Send is for drafts_send only. */
 export const GRAPH_SCOPES = [
+  'https://graph.microsoft.com/MailboxSettings.ReadWrite',
+  'https://graph.microsoft.com/Mail.ReadWrite',
+  'https://graph.microsoft.com/Mail.Send',
+  'offline_access'
+]
+
+/**
+ * Refresh with the scopes a token was actually granted (stored at sign-in),
+ * so adding a scope to GRAPH_SCOPES never breaks an existing token. Tokens
+ * from before scopes were stored got exactly these.
+ */
+const LEGACY_SCOPES = [
   'https://graph.microsoft.com/MailboxSettings.ReadWrite',
   'https://graph.microsoft.com/Mail.ReadWrite',
   'offline_access'
 ]
+
+type GraphTokens = OAuth2Tokens & { scope?: string }
 
 const REFRESH_BUFFER_S = 300
 
@@ -39,6 +54,7 @@ interface TokenResponse {
   access_token?: string
   refresh_token?: string
   expires_in?: number
+  scope?: string
   error?: string
   error_description?: string
 }
@@ -144,8 +160,10 @@ async function pollGraphAuth(
           accessToken: tok.access_token,
           refreshToken: tok.refresh_token,
           expiresAt: Math.floor(Date.now() / 1000) + (tok.expires_in ?? 3600),
-          clientId
-        })
+          clientId,
+          // Granted scopes (space-separated); offline_access is implied.
+          scope: tok.scope ? `${tok.scope} offline_access` : GRAPH_SCOPES.join(' ')
+        } as GraphTokens)
         pending.delete(key)
         return
       }
@@ -182,7 +200,9 @@ export async function graphAuthStatus(email: string): Promise<GraphAuthStatus> {
     verification_uri: p && !p.lastError ? p.verificationUri : undefined,
     user_code: p && !p.lastError ? p.userCode : undefined,
     error: p?.lastError,
-    scopes: GRAPH_SCOPES
+    scopes: ((tokens as GraphTokens | null)?.scope || (tokens ? LEGACY_SCOPES.join(' ') : ''))
+      .split(' ')
+      .filter(Boolean)
   }
 }
 
@@ -190,7 +210,7 @@ export async function graphAuthStatus(email: string): Promise<GraphAuthStatus> {
 
 async function graphToken(email: string): Promise<string> {
   const key = storeKey(email)
-  const tokens: OAuth2Tokens | null = await loadStoredTokens(key)
+  const tokens = (await loadStoredTokens(key)) as GraphTokens | null
   if (!tokens) {
     throw new EmailMCPError(
       `Microsoft Graph is not signed in for ${email}`,
@@ -205,7 +225,7 @@ async function graphToken(email: string): Promise<string> {
     client_id: tokens.clientId,
     grant_type: 'refresh_token',
     refresh_token: tokens.refreshToken,
-    scope: GRAPH_SCOPES.join(' ')
+    scope: tokens.scope || LEGACY_SCOPES.join(' ')
   })
   if (!tok.access_token) {
     throw new EmailMCPError(
@@ -214,11 +234,12 @@ async function graphToken(email: string): Promise<string> {
       'Re-run config action graph_auth_start to sign in again.'
     )
   }
-  const updated: OAuth2Tokens = {
+  const updated: GraphTokens = {
     accessToken: tok.access_token,
     refreshToken: tok.refresh_token || tokens.refreshToken,
     expiresAt: now + (tok.expires_in ?? 3600),
-    clientId: tokens.clientId
+    clientId: tokens.clientId,
+    scope: tokens.scope
   }
   saveTokens(key, updated)
   return updated.accessToken

@@ -110,6 +110,23 @@ register the new actions.
 - `messages` action `move_matching` (query + destination, newest first,
   capped at 1000 per call, returns `remaining`). Refuses an empty / ALL query.
 
+## Patch 4 — drafts as the only send path (pape.4)
+
+**New files:** `src/tools/composite/drafts.ts`, `drafts.test.ts`, `src/docs/drafts.md`.
+**Touched:** `graph.ts` (Mail.Send scope, per-token granted scopes), `registry.ts`,
+`security.ts`, registry tests (tool count 8 → 9).
+
+- `drafts` tool over Graph: `reply` (Outlook `createReply`/`createReplyAll`, so a
+  threaded reply with the quoted original; body goes above the quote),
+  `create`, `update`, `list`, `send`.
+- `send` only sends an existing draft: refused (`NOT_A_DRAFT`) unless the
+  message is `isDraft` and in the Drafts folder, and it has a recipient.
+  Downstream (pape-house) the proxy no longer exposes upstream `send_*`, so
+  draft → review → `drafts_send` is the only way mail leaves.
+- New Graph sign-ins request `Mail.Send`. Refresh uses the scopes each token
+  was granted (stored at sign-in; tokens from pape.3 fall back to the pape.3
+  set), so adding a scope never breaks an existing token.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
@@ -151,7 +168,7 @@ unlikely.
 docker build -t registry.pape.house/local/email-mcp:1.29.0-pape.2 \
              --target http \
              -f Dockerfile .
-docker push registry.pape.house/local/email-mcp:1.29.0-pape.3
+docker push registry.pape.house/local/email-mcp:1.29.0-pape.4
 ```
 
 Pin downstream consumers by `sha256:<digest>`, not by tag — Zot tag

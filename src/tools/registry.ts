@@ -21,6 +21,7 @@ import { buildOpenRelayHandler } from '@n24q02m/mcp-core'
 import { getSetupUrl, getState } from '../credential-state.js'
 import { type AttachmentsInput, attachments } from './composite/attachments.js'
 import { type ConfigInput, handleConfig } from './composite/config.js'
+import { type DraftsInput, drafts } from './composite/drafts.js'
 import { type FoldersInput, folders } from './composite/folders.js'
 import { type MessagesInput, messages } from './composite/messages.js'
 import { type RulesInput, rules } from './composite/rules.js'
@@ -49,7 +50,8 @@ const RESOURCES = [
   { uri: 'email://docs/send', name: 'Send Tool Docs', file: 'send.md' },
   { uri: 'email://docs/help', name: 'Help Tool Docs', file: 'help.md' },
   { uri: 'email://docs/config', name: 'Config Tool Docs', file: 'config.md' },
-  { uri: 'email://docs/rules', name: 'Rules Tool Docs', file: 'rules.md' }
+  { uri: 'email://docs/rules', name: 'Rules Tool Docs', file: 'rules.md' },
+  { uri: 'email://docs/drafts', name: 'Drafts Tool Docs', file: 'drafts.md' }
 ]
 
 /**
@@ -260,6 +262,41 @@ const TOOLS = [
     }
   },
   {
+    name: 'drafts',
+    description:
+      'Email drafts (Microsoft Graph). Drafts are the review step before anything is sent: write a draft, a person reviews it, then send it.\n\nActions (required params -> optional):\n- reply (message_id | uid -> folder, body, body_type, reply_all, to, cc): draft a threaded reply to an existing email (Outlook\'s own reply: keeps the thread, "RE:" subject, quoted original and recipients). Your body goes above the quote. The usual way to answer an email.\n- create (subject | body -> to, cc, body_type): draft a brand-new email\n- update (draft_id -> subject, body, body_type, to, cc): revise a draft\n- list (-> limit=25): drafts, newest first\n- send (draft_id): send an EXISTING draft. Refused unless the message is an unsent draft in the Drafts folder with at least one recipient.\n\nbody_type: "text" (default) or "html". message_id comes from messages search/read.',
+    annotations: {
+      title: 'Drafts',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['reply', 'create', 'update', 'list', 'send'],
+          description: 'Action to perform'
+        },
+        account: { type: 'string', description: 'Account email (optional with a single account)' },
+        message_id: { type: 'string', description: 'Message-ID of the email to reply to (from messages search/read)' },
+        uid: { type: 'number', description: 'IMAP uid of the email to reply to (alternative to message_id)' },
+        folder: { type: 'string', description: 'Folder of uid (default: INBOX)' },
+        reply_all: { type: 'boolean', description: 'Reply to all (reply action)' },
+        draft_id: { type: 'string', description: 'Draft id (update/send)' },
+        to: { type: 'string', description: 'Recipients, comma-separated' },
+        cc: { type: 'string', description: 'CC recipients, comma-separated' },
+        subject: { type: 'string', description: 'Subject (create/update)' },
+        body: { type: 'string', description: 'Body text (or HTML with body_type=html)' },
+        body_type: { type: 'string', enum: ['text', 'html'], description: 'Body format (default: text)' },
+        limit: { type: 'number', description: 'Max drafts for list (default 25)' }
+      },
+      required: ['action']
+    }
+  },
+  {
     name: 'config__open_relay',
     description:
       'Open the relay configuration form for better-email-mcp in the user browser. Returns the relay URL, whether the browser launched, and the current credential state. Auto-respawns the daemon if it has died.',
@@ -287,7 +324,7 @@ const TOOLS = [
       properties: {
         tool_name: {
           type: 'string',
-          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'rules', 'help'],
+          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'rules', 'drafts', 'help'],
           description: 'Tool to get documentation for'
         }
       },
@@ -306,7 +343,7 @@ async function handleHelp(args: unknown): Promise<{ tool: string; documentation:
     throw new EmailMCPError(
       `Invalid tool name: ${toolName}`,
       'VALIDATION_ERROR',
-      'Valid: messages, folders, attachments, send, config, rules, help'
+      'Valid: messages, folders, attachments, send, config, rules, drafts, help'
     )
   }
   const resource = RESOURCES.find((r) => r.uri === `email://docs/${toolName}`)
@@ -330,6 +367,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   send: (accounts, args) => send(accounts, args as unknown as SendInput),
   config: (accounts, args) => handleConfig(accounts, args as unknown as ConfigInput),
   rules: (accounts, args) => rules(accounts, args as unknown as RulesInput),
+  drafts: (accounts, args) => drafts(accounts, args as unknown as DraftsInput),
   help: (_, args) => handleHelp(args)
 }
 
