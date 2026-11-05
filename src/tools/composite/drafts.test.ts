@@ -5,7 +5,7 @@ const graphRequest = vi.fn()
 vi.mock('../helpers/graph.js', () => ({ graphRequest: (...a: unknown[]) => graphRequest(...a) }))
 vi.mock('../helpers/imap-client.js', () => ({ readEmail: vi.fn() }))
 
-const { drafts } = await import('./drafts.js')
+const { drafts, quoteStart, withQuote } = await import('./drafts.js')
 
 const account = {
   id: 'me',
@@ -68,5 +68,50 @@ describe('drafts send (pape-house fork)', () => {
       /Invalid email/
     )
     expect(graphRequest).not.toHaveBeenCalled()
+  })
+})
+
+const REPLY_HTML =
+  '<html><head><meta charset="utf-8"></head><body><div><br></div>' +
+  '<hr style="display:inline-block;width:98%" tabindex="-1">' +
+  '<div id="divRplyFwdMsg" dir="ltr"><b>From:</b> Mandi</div><div>original text</div></body></html>'
+
+describe('drafts quote handling (pape-house fork)', () => {
+  it('finds the quote at the <hr> before divRplyFwdMsg', () => {
+    expect(REPLY_HTML.slice(quoteStart(REPLY_HTML))).toMatch(/^<hr/)
+    expect(quoteStart('<p>new email</p>')).toBe(-1)
+  })
+
+  it('puts text above the quote and keeps the original', () => {
+    const out = withQuote(REPLY_HTML, 'Friday works.\nThanks', 'text')
+    expect(out).toContain('<div id="pm-reply">Friday works.<br>Thanks</div><hr')
+    expect(out).toContain('original text')
+    expect(out.startsWith('<html><head><meta charset="utf-8"></head><body>')).toBe(true)
+    expect(out).not.toContain('<div><br></div><hr')
+  })
+
+  it('replacing the text again still keeps one quote', () => {
+    const once = withQuote(REPLY_HTML, 'first', 'text')
+    const twice = withQuote(once, 'second <b>x</b>', 'text')
+    expect(twice).toContain('second &lt;b&gt;x&lt;/b&gt;')
+    expect(twice).not.toContain('first')
+    expect(twice.match(/divRplyFwdMsg/g)).toHaveLength(1)
+  })
+
+  it('update on a reply draft keeps the quote', async () => {
+    graphRequest.mockImplementation(async (_a: unknown, method: string, path: string, body?: any) => {
+      if (typeof path !== 'string') return undefined
+      if (path.startsWith('/me/mailFolders/drafts?')) return { id: DRAFTS_ID }
+      if (method === 'GET' && path.endsWith('$select=body'))
+        return { body: { contentType: 'html', content: REPLY_HTML } }
+      if (method === 'GET') return { id: 'm1', isDraft: true, parentFolderId: DRAFTS_ID }
+      if (method === 'PATCH') return { id: 'm1', patched: body }
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+    await drafts([account], { action: 'update', draft_id: 'm1', body: 'new text' })
+    const patch = graphRequest.mock.calls.find(([, m]) => m === 'PATCH')?.[3]
+    expect(patch.body.contentType).toBe('HTML')
+    expect(patch.body.content).toContain('new text')
+    expect(patch.body.content).toContain('original text')
   })
 })

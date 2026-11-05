@@ -179,22 +179,47 @@ async function resolveOriginal(account: AccountConfig, input: DraftsInput): Prom
   return id
 }
 
+/**
+ * Where Outlook's quoted original starts in a reply/forward body: the <hr>
+ * just before `divRplyFwdMsg` (Outlook web/desktop), else that div itself.
+ * -1 when the body has no quote (a new email).
+ */
+export function quoteStart(html: string): number {
+  const div = html.search(/<div[^>]*id=["']?divRplyFwdMsg/i)
+  if (div === -1) return -1
+  const hr = html.lastIndexOf('<hr', div)
+  return hr !== -1 && div - hr < 400 ? hr : div
+}
+
+/** The caller's text as HTML (plain text is escaped, newlines become <br>). */
+function myHtml(body: string, bodyType?: 'text' | 'html'): string {
+  return bodyType === 'html' ? body : escapeHtml(body).replace(/\r?\n/g, '<br>')
+}
+
+/**
+ * Put the caller's text above the quote, keeping Outlook's quoted original
+ * (and the reply's HTML head/body wrapper) intact. Replies are always HTML:
+ * that's what Outlook generates, and converting to text drops the quote.
+ */
+export function withQuote(existingHtml: string, body: string, bodyType?: 'text' | 'html'): string {
+  const mine = `<div id="pm-reply">${myHtml(body, bodyType)}</div>`
+  const q = quoteStart(existingHtml)
+  if (q === -1) return mine
+  const head = existingHtml.slice(0, q)
+  const bodyOpen = head.search(/<body[^>]*>/i)
+  const prefix = bodyOpen === -1 ? '' : head.slice(0, head.indexOf('>', bodyOpen) + 1)
+  return `${prefix}${mine}${existingHtml.slice(q)}`
+}
+
 async function handleReply(account: AccountConfig, input: DraftsInput): Promise<any> {
   const originalId = await resolveOriginal(account, input)
   const verb = input.reply_all ? 'createReplyAll' : 'createReply'
-  // Empty create, then PATCH our body in. `comment` on createReply would put
-  // the text above the quote too, but PATCH lets body_type=html work and keeps
-  // the quoted original Outlook generated.
+  // Empty create (Outlook builds the threaded reply + quoted original), then
+  // PATCH our text in above the quote.
   const d = await graphRequest(account, 'POST', `/me/messages/${encodeURIComponent(originalId)}/${verb}`, {})
   const patch: any = {}
   if (input.body !== undefined) {
-    const quoted = d.body?.content ?? ''
-    if (input.body_type === 'html' || d.body?.contentType === 'html') {
-      const mine = input.body_type === 'html' ? input.body : escapeHtml(input.body).replace(/\n/g, '<br>')
-      patch.body = { contentType: 'HTML', content: `<div>${mine}</div>${quoted}` }
-    } else {
-      patch.body = { contentType: 'Text', content: `${input.body}\n\n${quoted}` }
-    }
+    patch.body = { contentType: 'HTML', content: withQuote(d.body?.content ?? '', input.body, input.body_type) }
   }
   const to = recipients(input.to)
   const cc = recipients(input.cc)
@@ -214,8 +239,20 @@ async function handleUpdate(account: AccountConfig, input: DraftsInput): Promise
   await requireDraft(account, input)
   const patch: any = {}
   if (input.subject !== undefined) patch.subject = input.subject
-  const b = bodyOf(input)
-  if (b) patch.body = b
+  if (input.body !== undefined) {
+    // Keep a reply's quoted original: replace only the text above it.
+    const cur = await graphRequest<{ body?: { contentType?: string; content?: string } }>(
+      account,
+      'GET',
+      `${draftPath(input)}?$select=body`
+    )
+    const html = cur.body?.contentType?.toLowerCase() === 'html' ? (cur.body.content ?? '') : ''
+    if (quoteStart(html) !== -1) {
+      patch.body = { contentType: 'HTML', content: withQuote(html, input.body, input.body_type) }
+    } else {
+      patch.body = bodyOf(input)
+    }
+  }
   const to = recipients(input.to)
   const cc = recipients(input.cc)
   if (to) patch.toRecipients = to

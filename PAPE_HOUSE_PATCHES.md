@@ -127,6 +127,10 @@ register the new actions.
   was granted (stored at sign-in; tokens from pape.3 fall back to the pape.3
   set), so adding a scope never breaks an existing token.
 
+- pape.5: reply drafts stay HTML with the caller's text above Outlook's quote
+  (`<hr>` + `divRplyFwdMsg`), and `update` replaces only the text above the
+  quote. pape.4's update replaced the whole body and dropped the quote.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
@@ -168,7 +172,7 @@ unlikely.
 docker build -t registry.pape.house/local/email-mcp:1.29.0-pape.2 \
              --target http \
              -f Dockerfile .
-docker push registry.pape.house/local/email-mcp:1.29.0-pape.4
+docker push registry.pape.house/local/email-mcp:1.29.0-pape.5
 ```
 
 Pin downstream consumers by `sha256:<digest>`, not by tag — Zot tag
