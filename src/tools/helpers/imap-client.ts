@@ -497,6 +497,52 @@ export async function moveEmails(
 }
 
 /**
+ * Move every message matching an IMAP query (pape-house fork).
+ * Capped at `limit` (newest first) so one call can't sweep a whole mailbox
+ * by accident; call again to continue.
+ */
+export async function moveMatching(
+  account: AccountConfig,
+  query: string,
+  fromFolder: string,
+  toFolder: string,
+  limit: number
+): Promise<{ success: boolean; matched: number; moved: number; remaining: number }> {
+  const criteria = buildSearchCriteria(query)
+  if (Object.keys(criteria).length === 0) {
+    throw new EmailMCPError(
+      'move_matching needs a narrowing query',
+      'VALIDATION_ERROR',
+      'Use e.g. "FROM news@example.com" or "SUBJECT receipt BEFORE 2026-01-01". ALL is not allowed.'
+    )
+  }
+  return withConnection(account, async (client) => {
+    const lock = await client.getMailboxLock(fromFolder)
+    try {
+      const found = (await client.search(criteria, { uid: true })) || []
+      const uids = [...found].sort((a, b) => b - a).slice(0, limit)
+      if (uids.length > 0) {
+        await client.messageMove({ uid: uids.join(',') }, toFolder)
+      }
+      return { success: true, matched: found.length, moved: uids.length, remaining: found.length - uids.length }
+    } finally {
+      lock.release()
+    }
+  })
+}
+
+/**
+ * Create a mailbox folder (pape-house fork). Nested paths use the server's
+ * delimiter ("/" on Outlook). Idempotent: an existing folder is not an error.
+ */
+export async function createFolder(account: AccountConfig, path: string): Promise<{ path: string; created: boolean }> {
+  return withConnection(account, async (client) => {
+    const res: any = await client.mailboxCreate(path)
+    return { path: res?.path ?? path, created: res?.created !== false }
+  })
+}
+
+/**
  * Delete (trash) emails
  */
 export async function trashEmails(

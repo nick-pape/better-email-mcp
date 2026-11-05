@@ -6,7 +6,15 @@
 import type { AccountConfig } from '../helpers/config.js'
 import { resolveAccounts, resolveSingleAccount } from '../helpers/config.js'
 import { createUnknownActionError, EmailMCPError, withErrorHandling } from '../helpers/errors.js'
-import { listFolders, modifyFlags, moveEmails, readEmail, searchEmails, trashEmails } from '../helpers/imap-client.js'
+import {
+  listFolders,
+  modifyFlags,
+  moveEmails,
+  moveMatching,
+  readEmail,
+  searchEmails,
+  trashEmails
+} from '../helpers/imap-client.js'
 
 // Simple in-memory cache for archive folder paths to avoid repeated IMAP calls
 const archiveFolderCache = new Map<string, Promise<string>>()
@@ -19,7 +27,17 @@ export function clearArchiveFolderCache(): number {
 }
 
 export interface MessagesInput {
-  action: 'search' | 'read' | 'mark_read' | 'mark_unread' | 'flag' | 'unflag' | 'move' | 'archive' | 'trash'
+  action:
+    | 'search'
+    | 'read'
+    | 'mark_read'
+    | 'mark_unread'
+    | 'flag'
+    | 'unflag'
+    | 'move'
+    | 'move_matching'
+    | 'archive'
+    | 'trash'
 
   // Target account (optional - defaults to all for search, first for others)
   account?: string
@@ -64,6 +82,9 @@ export async function messages(accounts: AccountConfig[], input: MessagesInput):
       case 'move':
         return await handleMove(accounts, input)
 
+      case 'move_matching':
+        return await handleMoveMatching(accounts, input)
+
       case 'archive':
         return await handleArchive(accounts, input)
 
@@ -73,7 +94,7 @@ export async function messages(accounts: AccountConfig[], input: MessagesInput):
       default:
         throw createUnknownActionError(
           input.action,
-          'search, read, mark_read, mark_unread, flag, unflag, move, archive, trash'
+          'search, read, mark_read, mark_unread, flag, unflag, move, move_matching, archive, trash'
         )
     }
   })()
@@ -200,6 +221,34 @@ async function handleMove(accounts: AccountConfig[], input: MessagesInput): Prom
   return {
     action: 'move',
     account: account.email,
+    from_folder: folder,
+    to_folder: input.destination,
+    ...result
+  }
+}
+
+/**
+ * Move all messages matching a query (pape-house fork) — bulk filing
+ * without first listing UIDs. Capped per call (default 200, max 1000).
+ */
+const MOVE_MATCHING_DEFAULT = 200
+const MOVE_MATCHING_MAX = 1000
+
+async function handleMoveMatching(accounts: AccountConfig[], input: MessagesInput): Promise<any> {
+  if (!input.query) {
+    throw new EmailMCPError('query is required for move_matching', 'VALIDATION_ERROR', 'e.g. "FROM news@example.com"')
+  }
+  if (!input.destination) {
+    throw new EmailMCPError('destination is required for move_matching', 'VALIDATION_ERROR')
+  }
+  const account = resolveSingleAccount(accounts, input.account)
+  const folder = input.folder || 'INBOX'
+  const limit = Math.min(Math.max(1, Math.floor(input.limit ?? MOVE_MATCHING_DEFAULT)), MOVE_MATCHING_MAX)
+  const result = await moveMatching(account, input.query, folder, input.destination, limit)
+  return {
+    action: 'move_matching',
+    account: account.email,
+    query: input.query,
     from_folder: folder,
     to_folder: input.destination,
     ...result

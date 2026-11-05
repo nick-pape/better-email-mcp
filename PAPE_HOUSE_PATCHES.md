@@ -81,6 +81,35 @@ issued bearer to access it. For multi-tenant deployments this would be
 wrong and the upstream behavior is correct. Mark the deployment context
 explicitly if reusing this fork elsewhere.
 
+## Patch 3 — Outlook rules, folder create, move-by-query (pape.3)
+
+**Mechanism**: source-level additions; upstream files touched only to
+register the new actions.
+**New files:** `src/tools/helpers/graph.ts`, `src/tools/composite/rules.ts`,
+`src/tools/composite/rules.test.ts`, `src/docs/rules.md`.
+**Touched:** `registry.ts`, `config.ts`, `folders.ts`, `messages.ts`,
+`imap-client.ts`, `security.ts`, three registry tests (tool count 7 → 8).
+
+- `rules` tool (list / create / update / delete) over Microsoft Graph
+  `/me/mailFolders/inbox/messageRules`. IMAP cannot see server-side rules.
+  Folder actions take folder paths and are translated to Graph folder IDs.
+  Rule actions that delete or forward mail (`delete`, `permanentDelete`,
+  `forwardTo`, `forwardAsAttachmentTo`, `redirectTo`) are refused: a
+  forwarding rule would be a send/exfiltration path around the gateway's
+  no-send policy.
+- Graph needs its own token (different resource from outlook.office.com).
+  `config` actions `graph_auth_start` / `graph_auth_status` run a second
+  device-code sign-in, stored in `tokens.json` as `graph:<email>`. The IMAP
+  token is untouched.
+- Needs our own app registration via `OUTLOOK_CLIENT_ID` (the bundled
+  upstream client ID has no Graph permissions): personal accounts only,
+  public client flows on, delegated `MailboxSettings.ReadWrite`,
+  `Mail.ReadWrite`, `offline_access` (+ `IMAP.AccessAsUser.All`,
+  `SMTP.Send` so a future IMAP re-auth can use the same app).
+- `folders` action `create` (IMAP CREATE, idempotent).
+- `messages` action `move_matching` (query + destination, newest first,
+  capped at 1000 per call, returns `remaining`). Refuses an empty / ALL query.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
@@ -122,7 +151,7 @@ unlikely.
 docker build -t registry.pape.house/local/email-mcp:1.29.0-pape.2 \
              --target http \
              -f Dockerfile .
-docker push registry.pape.house/local/email-mcp:1.29.0-pape.2
+docker push registry.pape.house/local/email-mcp:1.29.0-pape.3
 ```
 
 Pin downstream consumers by `sha256:<digest>`, not by tag — Zot tag

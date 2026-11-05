@@ -23,6 +23,7 @@ import { type AttachmentsInput, attachments } from './composite/attachments.js'
 import { type ConfigInput, handleConfig } from './composite/config.js'
 import { type FoldersInput, folders } from './composite/folders.js'
 import { type MessagesInput, messages } from './composite/messages.js'
+import { type RulesInput, rules } from './composite/rules.js'
 import { type SendInput, send } from './composite/send.js'
 // Import mega tools
 import { type AccountConfig, loadConfig } from './helpers/config.js'
@@ -47,7 +48,8 @@ const RESOURCES = [
   { uri: 'email://docs/attachments', name: 'Attachments Tool Docs', file: 'attachments.md' },
   { uri: 'email://docs/send', name: 'Send Tool Docs', file: 'send.md' },
   { uri: 'email://docs/help', name: 'Help Tool Docs', file: 'help.md' },
-  { uri: 'email://docs/config', name: 'Config Tool Docs', file: 'config.md' }
+  { uri: 'email://docs/config', name: 'Config Tool Docs', file: 'config.md' },
+  { uri: 'email://docs/rules', name: 'Rules Tool Docs', file: 'rules.md' }
 ]
 
 /**
@@ -58,7 +60,7 @@ const TOOLS = [
   {
     name: 'messages',
     description:
-      'Search, read, and manage email messages.\n\nActions (required params -> optional):\n- search (-> account, query="UNSEEN", folder="INBOX", limit=20)\n- read (account, uid -> folder)\n- mark_read / mark_unread / flag / unflag (account, uid|uids -> folder)\n- move (account, uid|uids, destination -> folder)\n- archive / trash (account, uid|uids -> folder)\n\nQuery examples: "UNREAD", "FROM user@example.com", "SINCE 2026-01-01", "UNREAD FROM boss@company.com". Date format MUST be YYYY-MM-DD.',
+      'Search, read, and manage email messages.\n\nActions (required params -> optional):\n- search (-> account, query="UNSEEN", folder="INBOX", limit=20)\n- read (account, uid -> folder)\n- mark_read / mark_unread / flag / unflag (account, uid|uids -> folder)\n- move (account, uid|uids, destination -> folder)\n- move_matching (account, query, destination -> folder, limit=200): move every match, newest first, max 1000 per call; returns remaining\n- archive / trash (account, uid|uids -> folder)\n\nQuery examples: "UNREAD", "FROM user@example.com", "SINCE 2026-01-01", "UNREAD FROM boss@company.com". Date format MUST be YYYY-MM-DD.',
     annotations: {
       title: 'Messages',
       readOnlyHint: false,
@@ -71,7 +73,18 @@ const TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['search', 'read', 'mark_read', 'mark_unread', 'flag', 'unflag', 'move', 'archive', 'trash'],
+          enum: [
+            'search',
+            'read',
+            'mark_read',
+            'mark_unread',
+            'flag',
+            'unflag',
+            'move',
+            'move_matching',
+            'archive',
+            'trash'
+          ],
           description: 'Action to perform'
         },
         account: { type: 'string', description: 'Account email filter (optional, defaults to all for search)' },
@@ -84,7 +97,7 @@ const TOOLS = [
         limit: { type: 'number', description: 'Max results for search (default: 20)' },
         uid: { type: 'number', description: 'Email UID (for read/modify single email)' },
         uids: { type: 'array', items: { type: 'number' }, description: 'Multiple UIDs for batch operations' },
-        destination: { type: 'string', description: 'Target folder for move action' }
+        destination: { type: 'string', description: 'Target folder for move / move_matching' }
       },
       required: ['action']
     }
@@ -92,10 +105,10 @@ const TOOLS = [
   {
     name: 'folders',
     description:
-      'List mailbox folders.\n\nActions (required params -> optional):\n- list (-> account): folder names, paths, and flags for one or all accounts',
+      'List and create mailbox folders.\n\nActions (required params -> optional):\n- list (-> account): folder names, paths, and flags for one or all accounts\n- create (path -> account): create a folder; nested with "/" (e.g. "Receipts/Amazon"). Idempotent.',
     annotations: {
       title: 'Folders',
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false
@@ -105,10 +118,11 @@ const TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['list'],
+          enum: ['list', 'create'],
           description: 'Action to perform'
         },
-        account: { type: 'string', description: 'Account email filter (optional, defaults to all)' }
+        account: { type: 'string', description: 'Account email filter (optional, defaults to all)' },
+        path: { type: 'string', description: 'Folder path for create, e.g. "Receipts/Amazon"' }
       },
       required: ['action']
     }
@@ -185,7 +199,7 @@ const TOOLS = [
   {
     name: 'config',
     description:
-      'Manage email credential setup and runtime configuration.\n\nSetup actions (credential lifecycle):\n- status: Show current credential state, setup URL, and configured accounts\n- setup_start (-> force): Trigger relay setup session and return the setup URL. Set force=true to restart even if already in progress\n- setup_reset: Clear all saved credentials and reset to awaiting_setup state\n- setup_complete: Re-check credential state after external config changes (e.g. relay submission)\n\nRuntime actions:\n- set: Update runtime settings (email has no runtime settings; returns ok=false)\n- cache_clear: Clear in-memory account and OAuth token caches',
+      'Manage email credential setup and runtime configuration.\n\nSetup actions (credential lifecycle):\n- status: Show current credential state, setup URL, and configured accounts\n- setup_start (-> force): Trigger relay setup session and return the setup URL. Set force=true to restart even if already in progress\n- setup_reset: Clear all saved credentials and reset to awaiting_setup state\n- setup_complete: Re-check credential state after external config changes (e.g. relay submission)\n\nRuntime actions:\n- set: Update runtime settings (email has no runtime settings; returns ok=false)\n- cache_clear: Clear in-memory account and OAuth token caches\n\nMicrosoft Graph (Outlook rules) — a second sign-in:\n- graph_auth_start (-> account): start device-code sign-in; returns verification_uri + user_code\n- graph_auth_status (-> account): whether Graph is signed in',
     annotations: {
       title: 'Config',
       readOnlyHint: false,
@@ -198,12 +212,48 @@ const TOOLS = [
       properties: {
         action: {
           type: 'string',
-          enum: ['status', 'setup_start', 'setup_reset', 'setup_complete', 'set', 'cache_clear'],
+          enum: [
+            'status',
+            'setup_start',
+            'setup_reset',
+            'setup_complete',
+            'set',
+            'cache_clear',
+            'graph_auth_start',
+            'graph_auth_status'
+          ],
           description: 'Action to perform'
         },
         force: {
           type: 'boolean',
           description: 'Force restart relay setup even if already in progress (for setup_start action)'
+        },
+        account: { type: 'string', description: 'Account email (for graph_auth_*)' }
+      },
+      required: ['action']
+    }
+  },
+  {
+    name: 'rules',
+    description:
+      'Server-side Outlook inbox rules (Microsoft Graph messageRules). Rules run inside Outlook even when no agent is running.\n\nActions (required params -> optional):\n- list (-> account): all rules in order, folder actions shown as folder paths\n- create (rule -> account): rule = {displayName, conditions, actions, exceptions?, sequence?, isEnabled?}\n- update (rule_id, rule -> account): partial update\n- delete (rule_id -> account)\n\nconditions/exceptions use Graph messageRulePredicates, e.g. {"senderContains": ["@amazon.com"]}, {"subjectContains": ["receipt"]}, {"fromAddresses": [{"emailAddress": {"address": "a@b.com"}}]}.\nactions: moveToFolder / copyToFolder take a folder PATH (e.g. "Receipts/Amazon"; create it first with folders create), plus markAsRead, markImportance, assignCategories, stopProcessingRules. Deleting or forwarding actions are refused.\nRequires a one-time Graph sign-in (config graph_auth_start).',
+    annotations: {
+      title: 'Rules',
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false
+    },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'create', 'update', 'delete'], description: 'Action to perform' },
+        account: { type: 'string', description: 'Account email (optional with a single account)' },
+        rule_id: { type: 'string', description: 'Rule id from list (update/delete)' },
+        rule: {
+          type: 'object',
+          description: 'Rule body: displayName, sequence, isEnabled, conditions, exceptions, actions',
+          additionalProperties: true
         }
       },
       required: ['action']
@@ -237,7 +287,7 @@ const TOOLS = [
       properties: {
         tool_name: {
           type: 'string',
-          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'help'],
+          enum: ['messages', 'folders', 'attachments', 'send', 'config', 'rules', 'help'],
           description: 'Tool to get documentation for'
         }
       },
@@ -256,7 +306,7 @@ async function handleHelp(args: unknown): Promise<{ tool: string; documentation:
     throw new EmailMCPError(
       `Invalid tool name: ${toolName}`,
       'VALIDATION_ERROR',
-      'Valid: messages, folders, attachments, send, config, help'
+      'Valid: messages, folders, attachments, send, config, rules, help'
     )
   }
   const resource = RESOURCES.find((r) => r.uri === `email://docs/${toolName}`)
@@ -279,6 +329,7 @@ const TOOL_HANDLERS: Record<string, ToolHandler> = {
   attachments: (accounts, args) => attachments(accounts, args as unknown as AttachmentsInput),
   send: (accounts, args) => send(accounts, args as unknown as SendInput),
   config: (accounts, args) => handleConfig(accounts, args as unknown as ConfigInput),
+  rules: (accounts, args) => rules(accounts, args as unknown as RulesInput),
   help: (_, args) => handleHelp(args)
 }
 

@@ -4,12 +4,15 @@
  */
 
 import type { AccountConfig } from '../helpers/config.js'
-import { resolveAccounts } from '../helpers/config.js'
-import { createUnknownActionError, withErrorHandling } from '../helpers/errors.js'
-import { listFolders } from '../helpers/imap-client.js'
+import { resolveAccounts, resolveSingleAccount } from '../helpers/config.js'
+import { createUnknownActionError, EmailMCPError, withErrorHandling } from '../helpers/errors.js'
+import { createFolder, listFolders } from '../helpers/imap-client.js'
 
 export interface FoldersInput {
-  action: 'list'
+  action: 'list' | 'create'
+
+  // Folder path for create, e.g. "Receipts" or "Receipts/Amazon"
+  path?: string
 
   // Target account (optional - defaults to all)
   account?: string
@@ -24,10 +27,30 @@ export async function folders(accounts: AccountConfig[], input: FoldersInput): P
       case 'list':
         return await handleList(accounts, input)
 
+      case 'create':
+        return await handleCreate(accounts, input)
+
       default:
-        throw createUnknownActionError(input.action, 'list')
+        throw createUnknownActionError(input.action, 'list, create')
     }
   })()
+}
+
+/**
+ * Create a folder (pape-house fork). Idempotent.
+ */
+async function handleCreate(accounts: AccountConfig[], input: FoldersInput): Promise<any> {
+  const path = input.path?.trim().replace(/^\/+|\/+$/g, '')
+  if (!path) {
+    throw new EmailMCPError('path is required for create', 'VALIDATION_ERROR', 'e.g. "Receipts/Amazon"')
+  }
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control chars is the point
+  if (path.length > 200 || /[\x00-\x1f*%]/.test(path)) {
+    throw new EmailMCPError('Invalid folder path', 'VALIDATION_ERROR', 'No control characters, * or %')
+  }
+  const account = resolveSingleAccount(accounts, input.account)
+  const result = await createFolder(account, path)
+  return { action: 'create', account: account.email, ...result }
 }
 
 /**

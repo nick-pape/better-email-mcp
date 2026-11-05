@@ -13,13 +13,24 @@
 import type { CredentialState } from '../../credential-state.js'
 import { getSetupUrl, getState, resetState, resolveCredentialState } from '../../credential-state.js'
 import type { AccountConfig } from '../helpers/config.js'
+import { resolveSingleAccount } from '../helpers/config.js'
 import { createUnknownActionError, withErrorHandling } from '../helpers/errors.js'
+import { graphAuthStatus, startGraphAuth } from '../helpers/graph.js'
 import { clearSentFolderCache } from '../helpers/imap-client.js'
 import { _resetTokenCache } from '../helpers/oauth2.js'
 import { clearArchiveFolderCache } from './messages.js'
 
 export interface ConfigInput {
-  action: 'status' | 'setup_start' | 'setup_reset' | 'setup_complete' | 'set' | 'cache_clear'
+  action:
+    | 'status'
+    | 'setup_start'
+    | 'setup_reset'
+    | 'setup_complete'
+    | 'set'
+    | 'cache_clear'
+    | 'graph_auth_start'
+    | 'graph_auth_status'
+  account?: string
   force?: boolean
   key?: string
   value?: string
@@ -74,7 +85,7 @@ type ConfigResult =
 /**
  * Unified config tool - credential lifecycle + runtime settings
  */
-export async function handleConfig(accounts: AccountConfig[], input: ConfigInput): Promise<ConfigResult> {
+export async function handleConfig(accounts: AccountConfig[], input: ConfigInput): Promise<ConfigResult | object> {
   return withErrorHandling(async () => {
     switch (input.action) {
       case 'status':
@@ -95,10 +106,21 @@ export async function handleConfig(accounts: AccountConfig[], input: ConfigInput
       case 'cache_clear':
         return handleCacheClear()
 
+      // pape-house fork: second (Graph) sign-in for Outlook rules
+      case 'graph_auth_start': {
+        const account = resolveSingleAccount(accounts, input.account)
+        return { action: 'graph_auth_start', account: account.email, ...(await startGraphAuth(account.email)) }
+      }
+
+      case 'graph_auth_status': {
+        const account = resolveSingleAccount(accounts, input.account)
+        return { action: 'graph_auth_status', account: account.email, ...(await graphAuthStatus(account.email)) }
+      }
+
       default:
         throw createUnknownActionError(
           input.action,
-          'status, setup_start, setup_reset, setup_complete, set, cache_clear'
+          'status, setup_start, setup_reset, setup_complete, set, cache_clear, graph_auth_start, graph_auth_status'
         )
     }
   })()
