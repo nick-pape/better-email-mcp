@@ -17,7 +17,7 @@ import { graphRequest } from '../helpers/graph.js'
 import { readEmail } from '../helpers/imap-client.js'
 
 export interface DraftsInput {
-  action: 'list' | 'create' | 'reply' | 'update' | 'send'
+  action: 'list' | 'create' | 'reply' | 'update' | 'send' | 'send_new'
   account?: string
 
   // create / update
@@ -57,8 +57,10 @@ export async function drafts(accounts: AccountConfig[], input: DraftsInput): Pro
         return await handleUpdate(account, input)
       case 'send':
         return await handleSend(account, input)
+      case 'send_new':
+        return await handleSendNew(account, input)
       default:
-        throw createUnknownActionError(input.action, 'list, create, reply, update, send')
+        throw createUnknownActionError(input.action, 'list, create, reply, update, send, send_new')
     }
   })()
 }
@@ -153,6 +155,21 @@ async function handleCreate(account: AccountConfig, input: DraftsInput): Promise
   if (cc) payload.ccRecipients = cc
   const m = await graphRequest(account, 'POST', '/me/messages', payload)
   return { action: 'create', account: account.email, draft: present(m) }
+}
+
+/**
+ * pape-house: write a brand-new email and send it in one call. Exists so a
+ * gateway can grant "send to fixed recipients" without granting `send`
+ * (which would send any draft in the mailbox): the gateway pins `to` / `cc`
+ * on this action and never exposes `send` to that caller.
+ */
+async function handleSendNew(account: AccountConfig, input: DraftsInput): Promise<any> {
+  if (!input.to?.trim()) {
+    throw new EmailMCPError('to is required for send_new', 'VALIDATION_ERROR')
+  }
+  const created = await handleCreate(account, input)
+  const sent = await handleSend(account, { ...input, action: 'send', draft_id: created.draft.draft_id })
+  return { ...sent, action: 'send_new' }
 }
 
 async function resolveOriginal(account: AccountConfig, input: DraftsInput): Promise<string> {

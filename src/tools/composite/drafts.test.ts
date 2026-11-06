@@ -115,3 +115,46 @@ describe('drafts quote handling (pape-house fork)', () => {
     expect(patch.body.content).toContain('original text')
   })
 })
+
+describe('drafts send_new (pape-house fork)', () => {
+  it('creates the message then sends that same draft', async () => {
+    graphRequest.mockImplementation(async (_a: unknown, method: string, path: string, body?: any) => {
+      if (typeof path !== 'string') return undefined
+      if (path.startsWith('/me/mailFolders/drafts?')) return { id: DRAFTS_ID }
+      if (method === 'POST' && path === '/me/messages')
+        return {
+          id: 'new1',
+          subject: body.subject,
+          toRecipients: body.toRecipients,
+          isDraft: true,
+          parentFolderId: DRAFTS_ID
+        }
+      if (method === 'GET' && path.startsWith('/me/messages/new1'))
+        return {
+          id: 'new1',
+          subject: 'Brief',
+          toRecipients: [{ emailAddress: { address: 'a@b.com' } }],
+          isDraft: true,
+          parentFolderId: DRAFTS_ID
+        }
+      if (method === 'POST' && path === '/me/messages/new1/send') return undefined
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+    const r = await drafts([account], {
+      action: 'send_new',
+      to: 'a@b.com',
+      subject: 'Brief',
+      body: '<b>x</b>',
+      body_type: 'html'
+    })
+    expect(r.action).toBe('send_new')
+    expect(r.sent).toBe(true)
+    expect(sendCalls()).toHaveLength(1)
+    expect(sendCalls()[0][2]).toBe('/me/messages/new1/send')
+  })
+
+  it('refuses without recipients and creates nothing', async () => {
+    await expect(drafts([account], { action: 'send_new', subject: 'x', body: 'y' })).rejects.toThrow(/to is required/)
+    expect(graphRequest).not.toHaveBeenCalled()
+  })
+})

@@ -147,6 +147,15 @@ Graph sign-in vanished minutes later). Reads now reload when the file's mtime
 changes; saves read-merge-write. One upstream test asserted the old cache
 behaviour and was replaced with a merge test.
 
+## Patch 7 — drafts send_new (pape.8)
+
+`drafts` gains action `send_new`: create a brand-new email and send it in
+one call (create, then the existing `send` checks). It exists so the MCP hub
+can let an agent mail fixed recipients without granting `send`, which would
+send ANY draft in the mailbox: the hub pins `to` / `cc` on the proxy's
+`drafts_send_new` tool via `tool_arg_overrides` and never grants `send`.
+Used by the household money agent's weekly brief (to Nick and Katie only).
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
