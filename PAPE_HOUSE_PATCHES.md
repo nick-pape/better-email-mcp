@@ -156,6 +156,18 @@ send ANY draft in the mailbox: the hub pins `to` / `cc` on the proxy's
 `drafts_send_new` tool via `tool_arg_overrides` and never grants `send`.
 Used by the household money agent's weekly brief (to Nick and Katie only).
 
+## Patch 8 — drafts body_url (pape.9)
+
+`drafts create` / `send_new` accept `body_url` instead of `body`: the server
+GETs the URL and expects `{ subject?, html, inline?: [{ cid, name?,
+content_type, data }] }` (base64 images, referenced from the HTML as
+`cid:<id>`). They go to Graph as inline file attachments on the new message.
+Only URLs under a prefix in `EMAIL_MCP_BODY_URL_PREFIXES` (comma-separated,
+origin + path match, no redirects, 20s timeout, ~3 MB cap) are fetched.
+It exists so an agent can send an email another service built (the finance
+server's weekly brief with its charts) by passing a short URL: the HTML and
+images never go through the model.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):

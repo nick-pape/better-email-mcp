@@ -26,6 +26,8 @@ export interface DraftsInput {
   subject?: string
   body?: string
   body_type?: 'text' | 'html'
+  /** pape-house: fetch subject, HTML and inline images from an allow-listed URL instead of `body`. */
+  body_url?: string
 
   // reply: identify the original by Message-ID, or by IMAP uid (+ folder)
   message_id?: string
@@ -66,6 +68,85 @@ export async function drafts(accounts: AccountConfig[], input: DraftsInput): Pro
 }
 
 // ── helpers ────────────────────────────────────────────────────────────
+
+export interface FetchedBody {
+  subject?: string
+  html: string
+  inline: Array<{ cid: string; name?: string; content_type: string; data: string }>
+}
+
+const MAX_BODY_BYTES = 3 * 1024 * 1024
+
+/**
+ * pape-house: an email built by another service (the finance server's weekly brief): GET the URL,
+ * expect `{ subject?, html, inline?: [{ cid, name?, content_type, data(base64) }] }`. Only URLs
+ * under a prefix in EMAIL_MCP_BODY_URL_PREFIXES (comma-separated, matched on origin + path) are
+ * fetched, so a caller cannot point the server at anything else on the network.
+ */
+export async function fetchBody(raw: string): Promise<FetchedBody> {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new EmailMCPError('body_url is not a URL', 'VALIDATION_ERROR')
+  }
+  const prefixes = (process.env.EMAIL_MCP_BODY_URL_PREFIXES ?? '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean)
+  const allowed = prefixes.some((p) => {
+    try {
+      const pu = new URL(p)
+      return pu.origin === url.origin && url.pathname.startsWith(pu.pathname) && !url.pathname.includes('..')
+    } catch {
+      return false
+    }
+  })
+  if (!allowed) {
+    throw new EmailMCPError(
+      'body_url is not on the allow-list',
+      'VALIDATION_ERROR',
+      'Set EMAIL_MCP_BODY_URL_PREFIXES on the server'
+    )
+  }
+  let res: Response
+  try {
+    res = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(20_000) })
+  } catch (e) {
+    throw new EmailMCPError(`Could not fetch body_url: ${(e as Error).message}`, 'FETCH_FAILED')
+  }
+  if (!res.ok)
+    throw new EmailMCPError(`body_url answered ${res.status}`, 'FETCH_FAILED', 'It may have expired; make it again')
+  const text = await res.text()
+  if (text.length > MAX_BODY_BYTES * 1.4) throw new EmailMCPError('body_url content is too large', 'VALIDATION_ERROR')
+  let j: any
+  try {
+    j = JSON.parse(text)
+  } catch {
+    throw new EmailMCPError('body_url did not return JSON', 'VALIDATION_ERROR')
+  }
+  if (typeof j?.html !== 'string' || !j.html) throw new EmailMCPError('body_url JSON has no html', 'VALIDATION_ERROR')
+  const inline: FetchedBody['inline'] = []
+  for (const i of Array.isArray(j.inline) ? j.inline : []) {
+    if (
+      typeof i?.cid !== 'string' ||
+      !/^[A-Za-z0-9._-]{1,64}$/.test(i.cid) ||
+      typeof i.content_type !== 'string' ||
+      !/^image\/(png|jpeg|gif)$/.test(i.content_type) ||
+      typeof i.data !== 'string' ||
+      !/^[A-Za-z0-9+/=]+$/.test(i.data)
+    ) {
+      throw new EmailMCPError('body_url JSON has a malformed inline image', 'VALIDATION_ERROR')
+    }
+    inline.push({
+      cid: i.cid,
+      name: typeof i.name === 'string' ? i.name.slice(0, 100) : undefined,
+      content_type: i.content_type,
+      data: i.data
+    })
+  }
+  return { subject: typeof j.subject === 'string' ? j.subject : undefined, html: j.html, inline }
+}
 
 function recipients(list?: string): Array<{ emailAddress: { address: string } }> | undefined {
   if (list === undefined) return undefined
@@ -143,12 +224,31 @@ async function handleList(account: AccountConfig, input: DraftsInput): Promise<a
 }
 
 async function handleCreate(account: AccountConfig, input: DraftsInput): Promise<any> {
-  if (!input.subject && !input.body) {
+  if (input.body_url && input.body) {
+    throw new EmailMCPError('Give body or body_url, not both', 'VALIDATION_ERROR')
+  }
+  if (!input.subject && !input.body && !input.body_url) {
     throw new EmailMCPError('subject or body is required', 'VALIDATION_ERROR')
   }
   const payload: any = { subject: input.subject ?? '' }
-  const b = bodyOf(input)
-  if (b) payload.body = b
+  if (input.body_url) {
+    const fetched = await fetchBody(input.body_url)
+    if (!input.subject) payload.subject = fetched.subject ?? ''
+    payload.body = { contentType: 'HTML', content: fetched.html }
+    if (fetched.inline.length) {
+      payload.attachments = fetched.inline.map((i) => ({
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: i.name ?? `${i.cid}.png`,
+        contentType: i.content_type,
+        contentBytes: i.data,
+        contentId: i.cid,
+        isInline: true
+      }))
+    }
+  } else {
+    const b = bodyOf(input)
+    if (b) payload.body = b
+  }
   const to = recipients(input.to)
   const cc = recipients(input.cc)
   if (to) payload.toRecipients = to

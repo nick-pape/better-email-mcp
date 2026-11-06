@@ -266,7 +266,7 @@ const TOOLS = [
   {
     name: 'drafts',
     description:
-      'Email drafts (Microsoft Graph). Drafts are the review step before anything is sent: write a draft, a person reviews it, then send it.\n\nActions (required params -> optional):\n- reply (message_id | uid -> folder, body, body_type, reply_all, to, cc): draft a threaded reply to an existing email (Outlook\'s own reply: keeps the thread, "RE:" subject, quoted original and recipients). Your body goes above the quote. The usual way to answer an email.\n- create (subject | body -> to, cc, body_type): draft a brand-new email\n- update (draft_id -> subject, body, body_type, to, cc): revise a draft\n- list (-> limit=25): drafts, newest first\n- send (draft_id): send an EXISTING draft. Refused unless the message is an unsent draft in the Drafts folder with at least one recipient.\n- send_new (to, subject | body -> cc, body_type): write a new email and send it at once.\n\nbody_type: "text" (default) or "html". message_id comes from messages search/read.',
+      'Email drafts (Microsoft Graph). Drafts are the review step before anything is sent: write a draft, a person reviews it, then send it.\n\nActions (required params -> optional):\n- reply (message_id | uid -> folder, body, body_type, reply_all, to, cc): draft a threaded reply to an existing email (Outlook\'s own reply: keeps the thread, "RE:" subject, quoted original and recipients). Your body goes above the quote. The usual way to answer an email.\n- create (subject | body | body_url -> to, cc, body_type): draft a brand-new email\n- update (draft_id -> subject, body, body_type, to, cc): revise a draft\n- list (-> limit=25): drafts, newest first\n- send (draft_id): send an EXISTING draft. Refused unless the message is an unsent draft in the Drafts folder with at least one recipient.\n- send_new (to, subject | body | body_url -> cc, body_type): write a new email and send it at once.\n\nbody_url: a URL (allow-listed on the server) returning { subject, html, inline images }; the server fetches it and sends the HTML with its images, so pass the URL, not the content.\n\nbody_type: "text" (default) or "html". message_id comes from messages search/read.',
     annotations: {
       title: 'Drafts',
       readOnlyHint: false,
@@ -293,6 +293,11 @@ const TOOLS = [
         subject: { type: 'string', description: 'Subject (create/update)' },
         body: { type: 'string', description: 'Body text (or HTML with body_type=html)' },
         body_type: { type: 'string', enum: ['text', 'html'], description: 'Body format (default: text)' },
+        body_url: {
+          type: 'string',
+          description:
+            'create / send_new: fetch subject, HTML and inline images from this allow-listed URL instead of body'
+        },
         limit: { type: 'number', description: 'Max drafts for list (default 25)' }
       },
       required: ['action']

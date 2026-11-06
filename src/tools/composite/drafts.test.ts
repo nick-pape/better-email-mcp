@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AccountConfig } from '../helpers/config.js'
 
 const graphRequest = vi.fn()
@@ -156,5 +156,87 @@ describe('drafts send_new (pape-house fork)', () => {
   it('refuses without recipients and creates nothing', async () => {
     await expect(drafts([account], { action: 'send_new', subject: 'x', body: 'y' })).rejects.toThrow(/to is required/)
     expect(graphRequest).not.toHaveBeenCalled()
+  })
+})
+
+describe('drafts body_url (pape-house fork)', () => {
+  const PNG = Buffer.from('png').toString('base64')
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+    delete process.env.EMAIL_MCP_BODY_URL_PREFIXES
+  })
+
+  it('sends the fetched HTML with its images inline', async () => {
+    process.env.EMAIL_MCP_BODY_URL_PREFIXES = 'https://finance.example/briefs/'
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            subject: 'Week of Oct 26',
+            html: '<img src="cid:cash">',
+            inline: [{ cid: 'cash', name: 'cash.png', content_type: 'image/png', data: PNG }]
+          })
+        )
+    ) as any
+    let created: any
+    graphRequest.mockImplementation(async (_a: unknown, method: string, path: string, body?: any) => {
+      if (typeof path !== 'string') return undefined
+      if (path.startsWith('/me/mailFolders/drafts?')) return { id: DRAFTS_ID }
+      if (method === 'POST' && path === '/me/messages') {
+        created = body
+        return {
+          id: 'n2',
+          subject: body.subject,
+          toRecipients: body.toRecipients,
+          isDraft: true,
+          parentFolderId: DRAFTS_ID
+        }
+      }
+      if (method === 'GET' && path.startsWith('/me/messages/n2'))
+        return {
+          id: 'n2',
+          subject: 'Week of Oct 26',
+          toRecipients: [{ emailAddress: { address: 'a@b.com' } }],
+          isDraft: true,
+          parentFolderId: DRAFTS_ID
+        }
+      if (method === 'POST' && path === '/me/messages/n2/send') return undefined
+      throw new Error(`unexpected ${method} ${path}`)
+    })
+    const r = await drafts([account], {
+      action: 'send_new',
+      to: 'a@b.com',
+      body_url: 'https://finance.example/briefs/abc.json'
+    })
+    expect(r.sent).toBe(true)
+    expect(created.subject).toBe('Week of Oct 26')
+    expect(created.body).toEqual({ contentType: 'HTML', content: '<img src="cid:cash">' })
+    expect(created.attachments[0]).toMatchObject({
+      contentId: 'cash',
+      isInline: true,
+      contentType: 'image/png',
+      contentBytes: PNG
+    })
+  })
+
+  it('refuses a URL off the allow-list without fetching', async () => {
+    process.env.EMAIL_MCP_BODY_URL_PREFIXES = 'https://finance.example/briefs/'
+    const f = vi.fn()
+    globalThis.fetch = f as any
+    await expect(
+      drafts([account], { action: 'send_new', to: 'a@b.com', body_url: 'https://finance.example.evil/briefs/x.json' })
+    ).rejects.toThrow(/allow-list/)
+    await expect(
+      drafts([account], { action: 'send_new', to: 'a@b.com', body_url: 'https://finance.example/other' })
+    ).rejects.toThrow(/allow-list/)
+    expect(f).not.toHaveBeenCalled()
+    expect(graphRequest).not.toHaveBeenCalled()
+  })
+
+  it('refuses body and body_url together', async () => {
+    await expect(
+      drafts([account], { action: 'send_new', to: 'a@b.com', body: 'x', body_url: 'https://a/b' })
+    ).rejects.toThrow(/not both/)
   })
 })
