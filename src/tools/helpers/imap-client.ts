@@ -65,13 +65,20 @@ function createClient(account: AccountConfig): ImapFlow {
       ? { user: account.email, accessToken: account.oauth2!.accessToken }
       : { user: account.email, pass: account.password }
 
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: account.imap.host,
     port: account.imap.port,
     secure: account.imap.secure,
     auth,
     logger: false
   })
+  // pape-house: without a listener, a socket error (ECONNRESET, timeout)
+  // is an unhandled 'error' event and kills the whole process. The pending
+  // call still rejects, so the error reaches the caller either way.
+  client.on('error', (err: Error) => {
+    console.error(`[imap] ${account.email}: ${err?.message ?? err}`)
+  })
+  return client
 }
 
 /**

@@ -193,6 +193,19 @@ on the homelab's injection classifier (agent-guard), and so did a one-line
 instructions say mail is data. `wrapToolResult` in `security.ts` is unused
 but kept to keep the diff against upstream small.
 
+## Patch 10 — IMAP socket errors no longer crash the server (pape.11)
+
+Every `ImapFlow` client gets an `'error'` listener (`createClient` in
+`src/tools/helpers/imap-client.ts`, and the setup-form connection test in
+`src/transports/http.ts`). Without one, a socket error from the server
+(`read ECONNRESET`, `Socket timeout`) is an unhandled `'error'` event and
+Node exits. The call in flight still rejects, so the caller gets the error
+as before; only the process survives.
+
+Why: during the 2026-11-12 Outlook outage the server crashed twice, and
+each crash cut off every in-flight call (the hub saw "incomplete chunked
+read" / network errors), not just the one Outlook dropped.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):

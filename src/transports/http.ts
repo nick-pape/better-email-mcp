@@ -55,6 +55,8 @@ async function testImapConnection(account: AccountConfig): Promise<NextStep | nu
     auth: { user: account.email, pass: account.password },
     logger: false
   })
+  // pape-house: an unhandled 'error' event would kill the process.
+  client.on('error', () => {})
 
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error('IMAP connection timed out')), IMAP_CONNECT_TIMEOUT_MS)

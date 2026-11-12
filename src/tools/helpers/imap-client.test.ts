@@ -6,6 +6,7 @@ const { mockClient, mockRelease } = vi.hoisted(() => {
   const mockRelease = vi.fn()
   const mockClient = {
     connect: vi.fn().mockResolvedValue(undefined),
+    on: vi.fn(),
     logout: vi.fn().mockResolvedValue(undefined),
     getMailboxLock: vi.fn().mockResolvedValue({ release: mockRelease }),
     search: vi.fn().mockResolvedValue([1]),
@@ -991,6 +992,19 @@ describe('OAuth2 IMAP authentication', () => {
         auth: { user: 'test@outlook.com', accessToken: 'outlook-access-token' }
       })
     )
+  })
+
+  it('registers an error listener so a dropped socket cannot crash the process', async () => {
+    mockClient.list.mockResolvedValue([])
+    mockClient.on.mockClear()
+
+    await listFolders(account)
+
+    const call = mockClient.on.mock.calls.find((c: unknown[]) => c[0] === 'error')
+    expect(call).toBeDefined()
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(() => (call![1] as (e: Error) => void)(new Error('read ECONNRESET'))).not.toThrow()
+    errSpy.mockRestore()
   })
 
   it('creates ImapFlow with password for non-OAuth2 accounts', async () => {

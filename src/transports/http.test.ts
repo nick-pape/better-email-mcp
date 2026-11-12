@@ -83,11 +83,13 @@ describe('http transport', () => {
 
     // Server mock using function that returns an object with connect
     ;(Server as unknown as Mock).mockImplementation(function (this: any) {
+      this.on = vi.fn()
       this.connect = vi.fn()
     })
 
     // ImapFlow mock using function that returns an object
     ;(ImapFlow as unknown as Mock).mockImplementation(function (this: any) {
+      this.on = vi.fn()
       this.connect = vi.fn().mockResolvedValue(undefined)
       this.logout = vi.fn().mockResolvedValue(undefined)
       this.close = vi.fn().mockResolvedValue(undefined)
@@ -183,6 +185,7 @@ describe('http transport', () => {
       const mockConnect = vi.fn().mockResolvedValue(undefined)
       const mockLogout = vi.fn().mockResolvedValue(undefined)
       ;(ImapFlow as unknown as Mock).mockImplementation(function (this: any) {
+        this.on = vi.fn()
         this.connect = mockConnect
         this.logout = mockLogout
         this.close = vi.fn()
@@ -204,6 +207,7 @@ describe('http transport', () => {
 
       const mockConnect = vi.fn().mockRejectedValue(new Error('Auth failed'))
       ;(ImapFlow as unknown as Mock).mockImplementation(function (this: any) {
+        this.on = vi.fn()
         this.connect = mockConnect
         this.close = vi.fn()
       })
@@ -364,6 +368,7 @@ describe('http transport', () => {
       const mockConnect = vi.fn().mockResolvedValue(undefined)
       const mockLogout = vi.fn().mockResolvedValue(undefined)
       ;(ImapFlow as unknown as Mock).mockImplementation(function (this: any) {
+        this.on = vi.fn()
         this.connect = mockConnect
         this.logout = mockLogout
         this.close = vi.fn()
@@ -391,6 +396,7 @@ describe('http transport', () => {
         connect: vi.fn()
       }
       ;(Server as unknown as Mock).mockImplementation(function (this: any) {
+        this.on = vi.fn()
         return mockServer
       })
 
