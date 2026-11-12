@@ -168,9 +168,8 @@ describe('registry.ts - help tool success', () => {
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
 
-    const parsed = JSON.parse(result.content[0].text)
-    expect(parsed.tool).toBe('messages')
-    expect(parsed.documentation).toBe(docContent)
+    // pape.10: help returns the documentation text itself
+    expect(result.content[0].text).toBe(docContent)
 
     expect(readFile).toHaveBeenCalledWith(expect.stringContaining('messages.md'), 'utf-8')
   })

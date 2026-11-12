@@ -175,9 +175,9 @@ describe('CallToolRequestSchema handler - successful tool calls', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
-    // messages tool wraps with untrusted_email_content tags
-    expect(result.content[0].text).toContain('<untrusted_email_content>')
-    expect(result.content[0].text).toContain(JSON.stringify(mockResult, null, 2))
+    // pape.10: plain text (renderResult)
+    expect(result.content[0].text).toContain('uid: 1, subject: Test')
+    expect(result.content[0].text).not.toContain('untrusted_email_content')
   })
 
   it('should call folders function and return JSON result', async () => {
@@ -200,7 +200,7 @@ describe('CallToolRequestSchema handler - successful tool calls', () => {
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
     // folders tool is NOT in EXTERNAL_CONTENT_TOOLS, so no wrapping
-    expect(result.content[0].text).toBe(JSON.stringify(mockResult, null, 2))
+    expect(result.content[0].text).not.toContain('": ') // pape.10: plain text
   })
 
   it('should call send function and return JSON result', async () => {
@@ -227,8 +227,8 @@ describe('CallToolRequestSchema handler - successful tool calls', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
-    // send tool is NOT in EXTERNAL_CONTENT_TOOLS, so no wrapping
-    expect(result.content[0].text).toBe(JSON.stringify(mockResult, null, 2))
+    // pape.10: plain text (renderResult)
+    expect(result.content[0].text).not.toContain('": ')
   })
 
   it('should call attachments function and return wrapped JSON result', async () => {
@@ -250,9 +250,9 @@ describe('CallToolRequestSchema handler - successful tool calls', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
-    // attachments tool wraps with untrusted_email_content tags
-    expect(result.content[0].text).toContain('<untrusted_email_content>')
-    expect(result.content[0].text).toContain(JSON.stringify(mockResult, null, 2))
+    // pape.10: plain text (renderResult)
+    expect(result.content[0].text).not.toContain('untrusted_email_content')
+    expect(result.content[0].text).not.toContain('": ')
   })
 })
 

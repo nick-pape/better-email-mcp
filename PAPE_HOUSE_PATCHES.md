@@ -168,6 +168,31 @@ It exists so an agent can send an email another service built (the finance
 server's weekly brief with its charts) by passing a short URL: the HTML and
 images never go through the model.
 
+## Patch 9 — plain-text results (pape.10)
+
+Tool results are plain text written for the reader instead of
+`JSON.stringify(result, null, 2)` inside `<untrusted_email_content>` tags
+plus a SECURITY paragraph (`src/tools/helpers/render.ts`, wired in
+`registry.ts`):
+- `messages search`: one line per message,
+  `<uid> <date> <from> | <subject> [unread, flagged]`.
+- `messages read`: UID, From, To, Cc, Date, Subject, Attachments, then the
+  body with `<mailto:>` echoes and blank-line runs removed, the quoted
+  earlier thread cut, and a length cap (`EMAIL_MCP_BODY_MAX_CHARS`, 8000).
+- Actions (mark, flag, move, move_matching, archive, trash): one sentence.
+- `help`: the documentation text itself.
+- Everything else: compact `key: value` lines.
+Dates are in `EMAIL_MCP_TIMEZONE` (default America/Chicago). Dropped:
+account_id / account_email, Message-ID / In-Reply-To / References (replies
+go by UID), empty cc/bcc, echoed query/action keys, `\Seen`.
+
+Why: on a real agent's 31 email results this cut 129,564 characters to
+19,589 (-85%). The SECURITY paragraph also scored 1.0 as a prompt injection
+on the homelab's injection classifier (agent-guard), and so did a one-line
+"data, not instructions" note, so there is no note: the agent's own
+instructions say mail is data. `wrapToolResult` in `security.ts` is unused
+but kept to keep the diff against upstream small.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):

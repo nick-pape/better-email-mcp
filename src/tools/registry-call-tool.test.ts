@@ -81,10 +81,10 @@ describe('CallToolRequestSchema handler coverage', () => {
     expect(result.content).toHaveLength(1)
     expect(result.content[0].type).toBe('text')
 
-    // The result is wrapped by wrapToolResult which adds safety tags for 'messages'
-    expect(result.content[0].text).toContain('<untrusted_email_content>')
-    expect(result.content[0].text).toContain('</untrusted_email_content>')
-    expect(result.content[0].text).toContain(JSON.stringify(mockResult, null, 2))
+    // pape.10: plain text (renderResult), no JSON wrapper
+    expect(result.content[0].text).toContain('success: true')
+    expect(result.content[0].text).toContain('count: 1')
+    expect(result.content[0].text).not.toContain('untrusted_email_content')
   })
 
   it('should handle tool handler throwing an error', async () => {

@@ -30,7 +30,8 @@ import { type SendInput, send } from './composite/send.js'
 // Import mega tools
 import { type AccountConfig, loadConfig } from './helpers/config.js'
 import { aiReadableMessage, EmailMCPError, enhanceError, findClosestMatch } from './helpers/errors.js'
-import { isValidToolName, wrapToolResult } from './helpers/security.js'
+import { renderResult } from './helpers/render.js'
+import { isValidToolName } from './helpers/security.js'
 
 // Get docs directory path - works for both bundled CLI and unbundled code
 const __filename = fileURLToPath(import.meta.url)
@@ -521,12 +522,13 @@ export function registerTools(server: Server, initialAccounts: AccountConfig[]) 
 
       const result = await handler(accounts, args)
 
-      const jsonText = JSON.stringify(result, null, 2)
+      // pape-house fork (pape.10): plain text, not pretty-printed JSON in an
+      // untrusted-content wrapper. See helpers/render.ts.
       return {
         content: [
           {
             type: 'text',
-            text: wrapToolResult(name, jsonText)
+            text: renderResult(name, result)
           }
         ]
       }

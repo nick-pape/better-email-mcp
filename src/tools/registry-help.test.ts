@@ -61,7 +61,8 @@ describe('handleHelp documentation tool', () => {
     })
 
     expect(result.isError).toBeUndefined()
-    expect(result.content[0].text).toContain('messages')
+    // pape.10: help returns the documentation text itself
+    expect(result.content[0].text).toContain('Messages')
     expect(result.content[0].text).toContain(mockContent)
   })
 
