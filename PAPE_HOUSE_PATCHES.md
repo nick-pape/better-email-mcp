@@ -206,6 +206,21 @@ Why: during the 2026-11-12 Outlook outage the server crashed twice, and
 each crash cut off every in-flight call (the hub saw "incomplete chunked
 read" / network errors), not just the one Outlook dropped.
 
+## Patch 11 — "unreachable" instead of a proxy timeout (pape.12)
+
+IMAP clients get `connectionTimeout` 15 s, `greetingTimeout` 10 s and
+`socketTimeout` 45 s (imapflow defaults: 90 s, 16 s, 5 min), and
+`withConnection` rewrites network failures (`describeImapError`: socket
+codes like ETIMEOUT/ECONNRESET, or "required time" / "Socket timeout")
+as `"<imap host> unreachable (<reason>). Try again later."`. Auth and
+other errors pass through unchanged.
+
+Why: with imapflow's defaults a hung Outlook outlived the 30 s the
+email-mcp-proxy waits, so the agent saw "network error calling
+email-mcp-proxy" and could not tell an Outlook outage from a broken
+server. The proxy now waits 60 s (`REQUEST_TIMEOUT_S`), longer than any
+of these.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):

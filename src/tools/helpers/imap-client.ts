@@ -55,6 +55,42 @@ export interface FolderInfo {
   delimiter: string
 }
 
+const IMAP_CONNECTION_TIMEOUT_MS = 15_000
+const IMAP_GREETING_TIMEOUT_MS = 10_000
+const IMAP_SOCKET_TIMEOUT_MS = 45_000
+
+/** Socket-level error codes that mean the mail server could not be reached. */
+const UNREACHABLE_CODES = new Set([
+  'ETIMEOUT',
+  'ETIMEDOUT',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'EPIPE',
+  'EAI_AGAIN',
+  'NoConnection',
+  'GreetingTimeout',
+  'ClosedAfterConnectTLS',
+  'ClosedAfterConnectText'
+])
+
+/**
+ * pape-house: turn a network failure into one plain sentence, e.g.
+ * "outlook.office365.com unreachable (Socket timeout). Try again later."
+ * Other errors (auth, bad folder, bad UID) pass through unchanged.
+ */
+export function describeImapError(account: AccountConfig, error: unknown): unknown {
+  const err = error as { code?: string; message?: string } | undefined
+  const message = err?.message ?? String(error)
+  const network =
+    (err?.code !== undefined && UNREACHABLE_CODES.has(err.code)) ||
+    /required time|socket timeout|connection not available|unexpected close/i.test(message)
+  if (!network) return error
+  return new Error(`${account.imap.host} unreachable (${message}). Try again later.`)
+}
+
 /**
  * Create an ImapFlow client for the given account.
  * Uses XOAUTH2 for OAuth2 accounts, plain password otherwise.
@@ -70,7 +106,12 @@ function createClient(account: AccountConfig): ImapFlow {
     port: account.imap.port,
     secure: account.imap.secure,
     auth,
-    logger: false
+    logger: false,
+    // pape-house: give up well inside the 60 s the email-mcp-proxy waits,
+    // so the caller gets "unreachable" rather than a proxy timeout.
+    connectionTimeout: IMAP_CONNECTION_TIMEOUT_MS,
+    greetingTimeout: IMAP_GREETING_TIMEOUT_MS,
+    socketTimeout: IMAP_SOCKET_TIMEOUT_MS
   })
   // pape-house: without a listener, a socket error (ECONNRESET, timeout)
   // is an unhandled 'error' event and kills the whole process. The pending
@@ -94,6 +135,8 @@ async function withConnection<T>(account: AccountConfig, fn: (client: ImapFlow) 
   try {
     await client.connect()
     return await fn(client)
+  } catch (error) {
+    throw describeImapError(account, error)
   } finally {
     try {
       await client.logout()

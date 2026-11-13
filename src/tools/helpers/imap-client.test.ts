@@ -994,6 +994,22 @@ describe('OAuth2 IMAP authentication', () => {
     )
   })
 
+  it('reports a network failure as the server being unreachable', async () => {
+    mockClient.connect.mockRejectedValueOnce(
+      Object.assign(new Error('Failed to establish connection in required time'), { code: 'ETIMEOUT' })
+    )
+
+    await expect(listFolders(account)).rejects.toThrow(
+      'imap.gmail.com unreachable (Failed to establish connection in required time). Try again later.'
+    )
+  })
+
+  it('passes non-network errors through unchanged', async () => {
+    mockClient.connect.mockRejectedValueOnce(new Error('Authentication failed'))
+
+    await expect(listFolders(account)).rejects.toThrow(/^Authentication failed$/)
+  })
+
   it('registers an error listener so a dropped socket cannot crash the process', async () => {
     mockClient.list.mockResolvedValue([])
     mockClient.on.mockClear()
