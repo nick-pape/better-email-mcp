@@ -96,7 +96,7 @@ const TOOLS = [
         query: {
           type: 'string',
           description:
-            'IMAP search query (default: UNSEEN). Single: UNREAD, FLAGGED, SINCE YYYY-MM-DD, FROM email@example.com, SUBJECT text. Combined: UNREAD SINCE 2026-01-01, UNREAD FROM user@example.com. Dates MUST use YYYY-MM-DD format (e.g. 2026-03-21). Plain text is treated as subject search.'
+            'IMAP search query (default: UNSEEN). Single: UNREAD, FLAGGED, SINCE YYYY-MM-DD, FROM email@example.com, SUBJECT text. Combined: UNREAD SINCE 2026-01-01, UNREAD FROM user@example.com. Dates MUST use YYYY-MM-DD format (e.g. 2026-03-21). Plain text is treated as subject search. AFTER_UID n: only UIDs above n in this folder, oldest first (a cursor: keep the highest UID you saw).'
         },
         folder: { type: 'string', description: 'Mailbox folder (default: INBOX)' },
         limit: { type: 'number', description: 'Max results for search (default: 20)' },

@@ -1044,3 +1044,60 @@ describe('OAuth2 IMAP authentication', () => {
     expect(ensureValidToken).not.toHaveBeenCalled()
   })
 })
+
+// ============================================================================
+// AFTER_UID cursor (pape-house fork)
+// ============================================================================
+
+describe('AFTER_UID cursor', () => {
+  function msg(uid: number) {
+    return {
+      uid,
+      flags: new Set(),
+      envelope: {
+        subject: `m${uid}`,
+        from: [{ address: 'x@test.com' }],
+        to: [{ address: 'y@test.com' }],
+        date: new Date()
+      },
+      source: Buffer.from('text')
+    }
+  }
+
+  beforeEach(() => {
+    mockSimpleParser.mockResolvedValue({ text: 'text' } as any)
+  })
+
+  it('searches uid n+1:* alongside the other clauses', async () => {
+    mockClient.search.mockResolvedValue([])
+    await searchEmails([account], 'FROM a@b.com AFTER_UID 100', 'INBOX', 10)
+    expect(mockClient.search).toHaveBeenCalledWith({ from: 'a@b.com', uid: '101:*' }, { uid: true })
+  })
+
+  it('drops the newest message IMAP returns when nothing is newer', async () => {
+    mockClient.search.mockResolvedValue([90])
+    const r = await searchEmails([account], 'AFTER_UID 100', 'INBOX', 10)
+    expect(r).toEqual([])
+    expect(mockClient.fetchAll).not.toHaveBeenCalled()
+  })
+
+  it('returns the OLDEST limit after the cursor', async () => {
+    mockClient.search.mockResolvedValue([105, 101, 103, 102, 104])
+    mockClient.fetchAll.mockResolvedValue([msg(101), msg(102)])
+    await searchEmails([account], 'AFTER_UID 100', 'INBOX', 2)
+    expect(mockClient.fetchAll).toHaveBeenCalledWith([101, 102], expect.anything(), { uid: true })
+  })
+
+  it('without a cursor still returns the newest limit', async () => {
+    mockClient.search.mockResolvedValue([1, 2, 3])
+    mockClient.fetchAll.mockResolvedValue([msg(2), msg(3)])
+    await searchEmails([account], 'FROM a@b.com', 'INBOX', 2)
+    expect(mockClient.fetchAll).toHaveBeenCalledWith([2, 3], expect.anything(), { uid: true })
+  })
+
+  it('AFTER_UID alone is not taken as a subject', async () => {
+    mockClient.search.mockResolvedValue([])
+    await searchEmails([account], 'AFTER_UID 7', 'Sent', 10)
+    expect(mockClient.search).toHaveBeenCalledWith({ uid: '8:*' }, { uid: true })
+  })
+})

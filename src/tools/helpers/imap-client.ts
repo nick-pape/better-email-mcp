@@ -181,7 +181,29 @@ const KV_MATCHERS = {
   TO: /\bTO\s+("[^"]+"|'[^']+'|\S+)/i
 } as const
 
+// pape-house fork: `AFTER_UID n` = only messages whose UID is above n, in
+// this folder. A caller keeps the highest UID it has seen as a cursor and
+// never rescans. IMAP's `n+1:*` always matches the newest message even when
+// nothing is newer, so callers filter on afterUid too (see uidsAfter).
+const AFTER_UID_MATCHER = /\bAFTER_UID\s+(\d+)\b/i
+
+export function parseAfterUid(query: string): number | undefined {
+  const m = query.match(AFTER_UID_MATCHER)
+  return m ? Number(m[1]) : undefined
+}
+
+function uidsAfter(uids: number[], afterUid: number | undefined): number[] {
+  return afterUid === undefined ? uids : uids.filter((u) => u > afterUid)
+}
+
 function buildSearchCriteria(query: string): SearchObject {
+  const afterUid = parseAfterUid(query)
+  const criteria = buildBaseCriteria(query.replace(AFTER_UID_MATCHER, ' '))
+  if (afterUid !== undefined) criteria.uid = `${afterUid + 1}:*`
+  return criteria
+}
+
+function buildBaseCriteria(query: string): SearchObject {
   const trimmed = query.trim()
   if (!trimmed) return {}
 
@@ -377,6 +399,7 @@ export async function searchEmails(
   limit: number
 ): Promise<EmailSummary[]> {
   const criteria = buildSearchCriteria(query)
+  const afterUid = parseAfterUid(query)
 
   const accountPromises = accounts.map(async (account) => {
     try {
@@ -384,12 +407,18 @@ export async function searchEmails(
         const lock = await client.getMailboxLock(folder)
         try {
           // Step 1: search to get UIDs (fast — server-side filtering)
-          const allUids = await client.search(criteria, { uid: true })
+          const found = await client.search(criteria, { uid: true })
+          const allUids = uidsAfter(
+            [...((found || []) as number[])].sort((a, b) => a - b),
+            afterUid
+          )
 
-          if (!allUids || allUids.length === 0) return []
+          if (allUids.length === 0) return []
 
-          // Step 2: take the most recent `limit` UIDs (highest UIDs = most recent)
-          const selectedUids = (allUids as number[]).slice(-limit)
+          // Step 2: take the most recent `limit` UIDs (highest UIDs = most recent).
+          // With AFTER_UID (a cursor), the OLDEST `limit` instead, so the caller
+          // walks forward without skipping anything.
+          const selectedUids = afterUid === undefined ? allUids.slice(-limit) : allUids.slice(0, limit)
 
           // Step 3: fetch only those specific UIDs
           return await client.fetchAll(
@@ -569,7 +598,7 @@ export async function moveMatching(
   return withConnection(account, async (client) => {
     const lock = await client.getMailboxLock(fromFolder)
     try {
-      const found = (await client.search(criteria, { uid: true })) || []
+      const found = uidsAfter((await client.search(criteria, { uid: true })) || [], parseAfterUid(query))
       const uids = [...found].sort((a, b) => b - a).slice(0, limit)
       if (uids.length > 0) {
         await client.messageMove({ uid: uids.join(',') }, toFolder)

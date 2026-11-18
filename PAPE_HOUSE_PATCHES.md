@@ -221,6 +221,21 @@ email-mcp-proxy" and could not tell an Outlook outage from a broken
 server. The proxy now waits 60 s (`REQUEST_TIMEOUT_S`), longer than any
 of these.
 
+## Patch 12 — `AFTER_UID n` cursor in search queries (pape.13)
+
+`messages search` and `move_matching` accept `AFTER_UID n` alongside the
+other clauses: only messages in that folder whose UID is above n. It maps
+to IMAP `uid: n+1:*` and is also filtered client-side, because `n+1:*`
+always matches the newest message even when nothing is newer. With a
+cursor, search returns the OLDEST `limit` matches (not the newest), so a
+caller walks forward without gaps. The cursor itself is the caller's: it
+keeps the highest UID it saw (per folder) and passes it next time. The
+server stays stateless.
+
+Why: Postmaster rescanned `INBOX SINCE <date>` every half hour, so it
+re-judged the same mail and re-nagged about it. With a cursor each
+message is looked at once, in INBOX, Sent and each filed folder.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
