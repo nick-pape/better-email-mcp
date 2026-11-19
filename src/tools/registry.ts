@@ -241,7 +241,7 @@ const TOOLS = [
   {
     name: 'rules',
     description:
-      'Server-side Outlook inbox rules (Microsoft Graph messageRules). Rules run inside Outlook even when no agent is running.\n\nActions (required params -> optional):\n- list (-> account): all rules in order, folder actions shown as folder paths\n- create (rule -> account): rule = {displayName, conditions, actions, exceptions?, sequence?, isEnabled?}\n- update (rule_id, rule -> account): partial update\n- delete (rule_id -> account)\n\nconditions/exceptions use Graph messageRulePredicates, e.g. {"senderContains": ["@amazon.com"]}, {"subjectContains": ["receipt"]}, {"fromAddresses": [{"emailAddress": {"address": "a@b.com"}}]}.\nactions: moveToFolder / copyToFolder take a folder PATH (e.g. "Receipts/Amazon"; create it first with folders create), plus markAsRead, markImportance, assignCategories, stopProcessingRules. Deleting or forwarding actions are refused.\nRequires a one-time Graph sign-in (config graph_auth_start).',
+      'Server-side Outlook inbox rules (Microsoft Graph messageRules). Rules run inside Outlook even when no agent is running.\n\nActions (required params -> optional):\n- list (-> account): all rules in order, folder actions shown as folder paths\n- create (rule -> account): rule = {displayName, conditions, actions, exceptions?, sequence?, isEnabled?}\n- update (rule_id, rule, expected_folder -> account): partial update\n- delete (rule_id, expected_folder -> account)\nexpected_folder: the folder the rule moves mail to TODAY (as list shows it), or "none". Refused on a mismatch, so a mistyped rule_id cannot hit the wrong rule.\n\nconditions/exceptions use Graph messageRulePredicates, e.g. {"senderContains": ["@amazon.com"]}, {"subjectContains": ["receipt"]}, {"fromAddresses": [{"emailAddress": {"address": "a@b.com"}}]}.\nactions: moveToFolder / copyToFolder take a folder PATH (e.g. "Receipts/Amazon"; create it first with folders create), plus markAsRead, markImportance, assignCategories, stopProcessingRules. Deleting or forwarding actions are refused.\nRequires a one-time Graph sign-in (config graph_auth_start).',
     annotations: {
       title: 'Rules',
       readOnlyHint: false,
@@ -255,6 +255,10 @@ const TOOLS = [
         action: { type: 'string', enum: ['list', 'create', 'update', 'delete'], description: 'Action to perform' },
         account: { type: 'string', description: 'Account email (optional with a single account)' },
         rule_id: { type: 'string', description: 'Rule id from list (update/delete)' },
+        expected_folder: {
+          type: 'string',
+          description: 'update/delete: folder the rule moves mail to today, or "none" (refused on mismatch)'
+        },
         rule: {
           type: 'object',
           description: 'Rule body: displayName, sequence, isEnabled, conditions, exceptions, actions',

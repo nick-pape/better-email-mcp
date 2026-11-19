@@ -23,6 +23,8 @@ export interface RulesInput {
   account?: string
   rule_id?: string
   rule?: Record<string, any>
+  /** update/delete: the folder the rule currently moves (or copies) mail to, or "none". */
+  expected_folder?: string
 }
 
 const RULES_PATH = '/me/mailFolders/inbox/messageRules'
@@ -136,15 +138,50 @@ function requireRuleId(input: RulesInput): string {
   return encodeURIComponent(input.rule_id)
 }
 
+function normFolder(path: string | undefined | null): string {
+  const p = (path ?? '').trim().replace(/^\/+|\/+$/g, '').toLowerCase()
+  return p === '' ? 'none' : p
+}
+
+/**
+ * Guard against acting on the wrong rule: rule ids differ by a character or
+ * two, so update/delete must name the folder the rule targets today. The
+ * server fetches the rule and refuses on a mismatch.
+ */
+async function checkExpectedFolder(account: AccountConfig, id: string, input: RulesInput): Promise<void> {
+  if (typeof input.expected_folder !== 'string' || !input.expected_folder.trim()) {
+    throw new EmailMCPError(
+      'expected_folder is required',
+      'VALIDATION_ERROR',
+      'Pass the folder this rule moves mail to today, as rules list shows it (e.g. "Inbox/Shipping"), or "none"'
+    )
+  }
+  const [current, paths] = await Promise.all([
+    graphRequest<any>(account, 'GET', `${RULES_PATH}/${id}`),
+    folderIdToPath(account)
+  ])
+  const shown = presentRule(current, paths)
+  const target = shown.actions.moveToFolder ?? shown.actions.copyToFolder
+  if (normFolder(target) !== normFolder(input.expected_folder)) {
+    throw new EmailMCPError(
+      `Rule ${input.rule_id} is "${shown.displayName}" (sequence ${shown.sequence}), which moves mail to ${target ?? 'no folder'}, not ${input.expected_folder}. Nothing changed.`,
+      'RULE_MISMATCH',
+      'Check the rule_id against rules list: copy it from the line of the rule you mean'
+    )
+  }
+}
+
 async function handleUpdate(account: AccountConfig, input: RulesInput): Promise<any> {
   const id = requireRuleId(input)
   const body = await toGraphRule(account, input.rule ?? {}, true)
+  await checkExpectedFolder(account, id, input)
   const updated = await graphRequest(account, 'PATCH', `${RULES_PATH}/${id}`, body)
   return { action: 'update', account: account.email, rule: presentRule(updated, await folderIdToPath(account)) }
 }
 
 async function handleDelete(account: AccountConfig, input: RulesInput): Promise<any> {
   const id = requireRuleId(input)
+  await checkExpectedFolder(account, id, input)
   await graphRequest(account, 'DELETE', `${RULES_PATH}/${id}`)
   return { action: 'delete', account: account.email, rule_id: input.rule_id, deleted: true }
 }

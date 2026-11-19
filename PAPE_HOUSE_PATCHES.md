@@ -236,6 +236,18 @@ Why: Postmaster rescanned `INBOX SINCE <date>` every half hour, so it
 re-judged the same mail and re-nagged about it. With a cursor each
 message is looked at once, in INBOX, Sent and each filed folder.
 
+## Patch 13 — rules update/delete must name the rule's folder (pape.14)
+
+`rules update` and `rules delete` require `expected_folder`: the folder
+the rule moves (or copies) mail to today, as `rules list` shows it, or
+`none`. The server fetches the rule first and refuses with
+`RULE_MISMATCH` (naming the rule it actually is) if they differ; case and
+leading/trailing slashes are ignored.
+
+Why: Graph rule ids differ by a character or two. Postmaster meant to
+delete a duplicate Shipping rule and deleted the Recruiting rule instead.
+With the guard a mistyped id fails instead of hitting the wrong rule.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
