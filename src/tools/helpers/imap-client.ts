@@ -122,6 +122,36 @@ function createClient(account: AccountConfig): ImapFlow {
   return client
 }
 
+/** pape-house: pause before the one connect retry (tests set it to 0). */
+export const IMAP_CONNECT_RETRY = { delayMs: 2000 }
+
+/**
+ * pape-house: connect, retrying ONCE on a network failure. Outlook now and
+ * then drops or stalls a fresh connection ("Failed to establish connection
+ * in required time", "Unexpected close") when a run opens many in a burst.
+ * Only the connect is retried, never the operation, so nothing (a move, a
+ * flag) can happen twice. Auth and other errors are not retried.
+ */
+async function connectWithRetry(account: AccountConfig): Promise<ImapFlow> {
+  for (let attempt = 1; ; attempt++) {
+    const client = createClient(account)
+    try {
+      await client.connect()
+      return client
+    } catch (error) {
+      try {
+        await client.logout()
+      } catch {
+        // already closed
+      }
+      const described = describeImapError(account, error)
+      if (attempt >= 2 || described === error) throw described
+      console.error(`[imap] ${account.email}: connect failed (${(error as Error)?.message ?? error}); retrying once`)
+      await new Promise((r) => setTimeout(r, IMAP_CONNECT_RETRY.delayMs))
+    }
+  }
+}
+
 /**
  * Execute an operation with an IMAP connection (auto-connect/disconnect).
  * For OAuth2 accounts, refreshes the access token before connecting.
@@ -131,9 +161,8 @@ async function withConnection<T>(account: AccountConfig, fn: (client: ImapFlow) 
     await ensureValidToken(account)
   }
 
-  const client = createClient(account)
+  const client = await connectWithRetry(account)
   try {
-    await client.connect()
     return await fn(client)
   } catch (error) {
     throw describeImapError(account, error)

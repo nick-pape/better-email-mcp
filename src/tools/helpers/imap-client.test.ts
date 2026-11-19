@@ -47,6 +47,7 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import {
   appendToFolder,
+  IMAP_CONNECT_RETRY,
   getAttachment,
   listFolders,
   modifyFlags,
@@ -85,6 +86,7 @@ function _toAsyncIterable<T>(items: T[]): AsyncIterable<T> {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  IMAP_CONNECT_RETRY.delayMs = 0
   mockClient.connect.mockResolvedValue(undefined)
   mockClient.logout.mockResolvedValue(undefined)
   mockClient.getMailboxLock.mockResolvedValue({ release: mockRelease })
@@ -995,9 +997,9 @@ describe('OAuth2 IMAP authentication', () => {
   })
 
   it('reports a network failure as the server being unreachable', async () => {
-    mockClient.connect.mockRejectedValueOnce(
-      Object.assign(new Error('Failed to establish connection in required time'), { code: 'ETIMEOUT' })
-    )
+    // fails twice: the first failure is retried once (connect retry)
+    const timeout = () => Object.assign(new Error('Failed to establish connection in required time'), { code: 'ETIMEOUT' })
+    mockClient.connect.mockRejectedValueOnce(timeout()).mockRejectedValueOnce(timeout())
 
     await expect(listFolders(account)).rejects.toThrow(
       'imap.gmail.com unreachable (Failed to establish connection in required time). Try again later.'
@@ -1121,5 +1123,46 @@ describe('AFTER_UID cursor', () => {
     mockClient.search.mockResolvedValue([])
     await searchEmails([account], 'AFTER_UID 7', 'Sent', 10)
     expect(mockClient.search).toHaveBeenCalledWith({ uid: '8:*' }, { uid: true })
+  })
+})
+
+// ============================================================================
+// Connect retry (pape-house fork)
+// ============================================================================
+
+describe('connect retry', () => {
+  beforeEach(() => {
+    IMAP_CONNECT_RETRY.delayMs = 0
+    mockClient.search.mockResolvedValue([])
+  })
+
+  it('retries a dropped connect once, then succeeds', async () => {
+    mockClient.connect.mockRejectedValueOnce(new Error('Failed to establish connection in required time'))
+    const r = await searchEmails([account], 'ALL', 'INBOX', 10)
+    expect(r).toEqual([])
+    expect(mockClient.connect).toHaveBeenCalledTimes(2)
+  })
+
+  it('gives up after the second failure with the plain unreachable message', async () => {
+    mockClient.connect.mockRejectedValueOnce(new Error('Unexpected close'))
+    mockClient.connect.mockRejectedValueOnce(new Error('Unexpected close'))
+    const r = await searchEmails([account], 'ALL', 'INBOX', 10)
+    expect(r[0].subject).toMatch(/unreachable \(Unexpected close\)/)
+    expect(mockClient.connect).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not retry an auth failure', async () => {
+    mockClient.connect.mockRejectedValueOnce(new Error('AUTHENTICATE failed'))
+    const r = await searchEmails([account], 'ALL', 'INBOX', 10)
+    expect(r[0].subject).toMatch(/AUTHENTICATE failed/)
+    expect(mockClient.connect).toHaveBeenCalledTimes(1)
+  })
+
+  it('never retries the operation itself', async () => {
+    mockClient.search.mockRejectedValueOnce(new Error('Unexpected close'))
+    const r = await searchEmails([account], 'ALL', 'INBOX', 10)
+    expect(r[0].subject).toMatch(/unreachable/)
+    expect(mockClient.connect).toHaveBeenCalledTimes(1)
+    expect(mockClient.search).toHaveBeenCalledTimes(1)
   })
 })

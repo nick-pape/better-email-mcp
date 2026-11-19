@@ -258,6 +258,18 @@ from another folder (UIDs are per folder).
 Why: Postmaster saved INBOX's UID (507167) as the Newsletters cursor
 (~1260), so every run found "nothing new" there and silently skipped it.
 
+## Patch 15 — one connect retry on a network failure (pape.16)
+
+`withConnection` retries the IMAP connect once, after 2 s, when it fails
+with a network error (`describeImapError` classifies it: "Failed to
+establish connection in required time", "Unexpected close", ECONNRESET...).
+Only the connect is retried, never the operation, so a move or flag can't
+run twice; auth errors are not retried.
+
+Why: each tool call opens a fresh connection + XOAUTH2 login, ~25 per
+Postmaster run in bursts of 5; Outlook drops or stalls one now and then,
+which failed a search or a whole run.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):
