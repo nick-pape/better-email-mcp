@@ -248,6 +248,16 @@ Why: Graph rule ids differ by a character or two. Postmaster meant to
 delete a duplicate Shipping rule and deleted the Recruiting rule instead.
 With the guard a mistyped id fails instead of hitting the wrong rule.
 
+## Patch 14 — a cursor past the folder's end is reported (pape.15)
+
+`messages search` with `AFTER_UID n` where n >= the folder's UIDNEXT
+returns one `[ERROR] CURSOR_PAST_END` line naming the folder's newest UID
+instead of an empty result. Such a cursor can never match: it was copied
+from another folder (UIDs are per folder).
+
+Why: Postmaster saved INBOX's UID (507167) as the Newsletters cursor
+(~1260), so every run found "nothing new" there and silently skipped it.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):

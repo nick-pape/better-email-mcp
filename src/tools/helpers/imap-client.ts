@@ -413,7 +413,18 @@ export async function searchEmails(
             afterUid
           )
 
-          if (allUids.length === 0) return []
+          if (allUids.length === 0) {
+            // A cursor at or past UIDNEXT can never match anything: it was
+            // copied from another folder (UIDs are per folder). Say so,
+            // instead of an empty result that hides the folder forever.
+            const uidNext = client.mailbox ? client.mailbox.uidNext : undefined
+            if (afterUid !== undefined && typeof uidNext === 'number' && afterUid >= uidNext) {
+              throw new Error(
+                `CURSOR_PAST_END: AFTER_UID ${afterUid} is past the newest message in ${folder} (uid ${uidNext - 1}). UIDs are per folder; set this folder's cursor to ${uidNext - 1}.`
+              )
+            }
+            return []
+          }
 
           // Step 2: take the most recent `limit` UIDs (highest UIDs = most recent).
           // With AFTER_UID (a cursor), the OLDEST `limit` instead, so the caller

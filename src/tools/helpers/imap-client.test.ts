@@ -1095,6 +1095,28 @@ describe('AFTER_UID cursor', () => {
     expect(mockClient.fetchAll).toHaveBeenCalledWith([2, 3], expect.anything(), { uid: true })
   })
 
+  it('flags a cursor past the folder UIDNEXT instead of returning nothing', async () => {
+    mockClient.search.mockResolvedValue([])
+    ;(mockClient as any).mailbox = { uidNext: 1261 }
+    try {
+      const r = await searchEmails([account], 'AFTER_UID 507167', 'Inbox/Newsletters', 10)
+      expect(r).toHaveLength(1)
+      expect(r[0].subject).toMatch(/CURSOR_PAST_END.*507167.*Inbox\/Newsletters \(uid 1260\).*cursor to 1260/)
+    } finally {
+      delete (mockClient as any).mailbox
+    }
+  })
+
+  it('a cursor below UIDNEXT with nothing new is just empty', async () => {
+    mockClient.search.mockResolvedValue([])
+    ;(mockClient as any).mailbox = { uidNext: 1261 }
+    try {
+      expect(await searchEmails([account], 'AFTER_UID 1260', 'Inbox/Newsletters', 10)).toEqual([])
+    } finally {
+      delete (mockClient as any).mailbox
+    }
+  })
+
   it('AFTER_UID alone is not taken as a subject', async () => {
     mockClient.search.mockResolvedValue([])
     await searchEmails([account], 'AFTER_UID 7', 'Sent', 10)
