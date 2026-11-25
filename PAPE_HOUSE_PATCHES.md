@@ -270,6 +270,24 @@ Why: each tool call opens a fresh connection + XOAUTH2 login, ~25 per
 Postmaster run in bursts of 5; Outlook drops or stalls one now and then,
 which failed a search or a whole run.
 
+## Patch 16 — rules `file`, and no mixed sender conditions (pape.17)
+
+`rules` action `file` (folder, uid/uids, destination): reads each message's
+From address, adds new senders to the destination's "(senders)" rule (a
+rule whose only condition is fromAddresses; created as "<leaf> (senders)"
+if the folder has none), then moves the messages. A sender already caught
+by a rule for another folder refuses the whole call, nothing changed. The
+proxy exposes it as `messages_file`.
+
+create/update refuse conditions holding both `senderContains` and
+`fromAddresses`: Outlook ANDs every predicate, so such a rule matches
+almost nothing.
+
+Why: on 2026-11-24 Postmaster added "@facebookmail.com" as senderContains
+to Promotions (senders) (120 fromAddresses), and every promotion landed
+in the inbox for the day; Postmaster then moved each one by hand. The
+"add the sender, then move" two-step was also easy to half-do.
+
 ## Rebase recipe
 
 Run quarterly (or when upstream cuts a release worth taking):

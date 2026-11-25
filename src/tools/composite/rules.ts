@@ -17,10 +17,16 @@ import type { AccountConfig } from '../helpers/config.js'
 import { resolveSingleAccount } from '../helpers/config.js'
 import { createUnknownActionError, EmailMCPError, withErrorHandling } from '../helpers/errors.js'
 import { folderIdToPath, graphRequest, resolveFolderId } from '../helpers/graph.js'
+import { fetchSenders, moveEmails } from '../helpers/imap-client.js'
 
 export interface RulesInput {
-  action: 'list' | 'create' | 'update' | 'delete'
+  action: 'list' | 'create' | 'update' | 'delete' | 'file'
   account?: string
+  /** file: the folder the uid(s) are in now, the uid(s), and the folder they belong in. */
+  folder?: string
+  uid?: number
+  uids?: number[]
+  destination?: string
   rule_id?: string
   rule?: Record<string, any>
   /** update/delete: the folder the rule currently moves (or copies) mail to, or "none". */
@@ -45,8 +51,10 @@ export async function rules(accounts: AccountConfig[], input: RulesInput): Promi
         return await handleUpdate(account, input)
       case 'delete':
         return await handleDelete(account, input)
+      case 'file':
+        return await handleFile(account, input)
       default:
-        throw createUnknownActionError(input.action, 'list, create, update, delete')
+        throw createUnknownActionError(input.action, 'list, create, update, delete, file')
     }
   })()
 }
@@ -98,6 +106,7 @@ async function toGraphRule(account: AccountConfig, rule: Record<string, any>, pa
       throw new EmailMCPError('rule.actions is required', 'VALIDATION_ERROR', 'e.g. {"moveToFolder": "Receipts"}')
     }
   }
+  checkConditionShape(rule.conditions)
   const body: any = { ...rule }
   if (body.actions) {
     const actions = { ...body.actions }
@@ -125,6 +134,21 @@ async function toGraphRule(account: AccountConfig, rule: Record<string, any>, pa
   return body
 }
 
+/**
+ * Outlook requires EVERY predicate in a rule's conditions to match. A rule with both senderContains and
+ * fromAddresses only fires for a sender on both lists, so it silently stops filing (2026-11-24: adding
+ * "@facebookmail.com" to Promotions (senders) sent every promotion to the inbox).
+ */
+function checkConditionShape(conditions: any): void {
+  if (conditions?.senderContains?.length && conditions?.fromAddresses?.length) {
+    throw new EmailMCPError(
+      'conditions has both senderContains and fromAddresses',
+      'VALIDATION_ERROR',
+      'Outlook requires every condition to match, so a sender would have to be on both lists and the rule would stop filing. Put domain matches in a rule of their own, e.g. "Promotions (domains)" with only senderContains.'
+    )
+  }
+}
+
 async function handleCreate(account: AccountConfig, input: RulesInput): Promise<any> {
   const body = await toGraphRule(account, input.rule ?? {}, false)
   const created = await graphRequest(account, 'POST', RULES_PATH, body)
@@ -139,7 +163,10 @@ function requireRuleId(input: RulesInput): string {
 }
 
 function normFolder(path: string | undefined | null): string {
-  const p = (path ?? '').trim().replace(/^\/+|\/+$/g, '').toLowerCase()
+  const p = (path ?? '')
+    .trim()
+    .replace(/^\/+|\/+$/g, '')
+    .toLowerCase()
   return p === '' ? 'none' : p
 }
 
@@ -184,4 +211,127 @@ async function handleDelete(account: AccountConfig, input: RulesInput): Promise<
   await checkExpectedFolder(account, id, input)
   await graphRequest(account, 'DELETE', `${RULES_PATH}/${id}`)
   return { action: 'delete', account: account.email, rule_id: input.rule_id, deleted: true }
+}
+
+/** A rule that only matches exact senders and moves them to a folder: the kind `file` adds senders to. */
+function isSenderRule(r: any): boolean {
+  const set = (o: any) =>
+    Object.keys(o ?? {}).filter((k) => {
+      const v = o[k]
+      return v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0)
+    })
+  const keys = set(r.conditions)
+  return (
+    !r.isReadOnly &&
+    !!r.actions?.moveToFolder &&
+    keys.length === 1 &&
+    keys[0] === 'fromAddresses' &&
+    set(r.exceptions).length === 0
+  )
+}
+
+/** The first enabled rule (in run order) that already catches this sender, by fromAddresses or senderContains. */
+function ruleFor(address: string, all: any[]): any | undefined {
+  const a = address.toLowerCase()
+  return [...all]
+    .filter((r) => r.isEnabled !== false)
+    .sort((x, y) => (x.sequence ?? 0) - (y.sequence ?? 0))
+    .find(
+      (r) =>
+        (r.conditions?.fromAddresses ?? []).some((f: any) => f?.emailAddress?.address?.toLowerCase() === a) ||
+        (r.conditions?.senderContains ?? []).some((s: string) => !!s && a.includes(s.toLowerCase()))
+    )
+}
+
+const SENDERS_RULE = /\(senders\)$/
+
+/**
+ * File messages: add each sender to the destination folder's "(senders)" rule (created if there is none),
+ * then move the messages. One call, so the rule can't be forgotten and future mail files itself.
+ * Refused, with nothing changed, when a sender already belongs to a rule for another folder.
+ */
+async function handleFile(account: AccountConfig, input: RulesInput): Promise<any> {
+  const uids = input.uids?.length ? input.uids : input.uid ? [input.uid] : []
+  if (uids.length === 0) throw new EmailMCPError('uid or uids required', 'VALIDATION_ERROR')
+  if (!input.folder) {
+    throw new EmailMCPError('folder is required', 'VALIDATION_ERROR', 'The folder the uid(s) came from, e.g. "INBOX"')
+  }
+  if (!input.destination) {
+    throw new EmailMCPError('destination is required', 'VALIDATION_ERROR', 'The folder the mail belongs in')
+  }
+  const dest = input.destination
+  const senders = await fetchSenders(account, uids, input.folder)
+  const missing = uids.filter((u) => !senders.has(u))
+  if (missing.length) {
+    throw new EmailMCPError(
+      `UID ${missing.join(', ')} not found in ${input.folder}. Nothing changed.`,
+      'NOT_FOUND',
+      'UIDs are per folder: pass the folder the uids came from'
+    )
+  }
+  const [page, paths] = await Promise.all([
+    graphRequest<{ value: any[] }>(account, 'GET', `${RULES_PATH}?$top=200`),
+    folderIdToPath(account)
+  ])
+  const all = page.value
+  const folderOf = (r: any) => paths.get(r.actions?.moveToFolder) ?? r.actions?.moveToFolder ?? 'none'
+
+  const add = new Map<string, { address: string; name: string }>()
+  const already = new Set<string>()
+  const conflicts: string[] = []
+  for (const s of senders.values()) {
+    const key = s.address.toLowerCase()
+    if (add.has(key) || already.has(key)) continue
+    const owner = ruleFor(s.address, all)
+    if (!owner) add.set(key, s)
+    else if (normFolder(folderOf(owner)) === normFolder(dest)) already.add(key)
+    else conflicts.push(`${s.address} is in "${owner.displayName}", which files to ${folderOf(owner)}`)
+  }
+  if (conflicts.length) {
+    throw new EmailMCPError(
+      `Not filed: ${conflicts.join('; ')}. Nothing changed.`,
+      'RULE_CONFLICT',
+      `If this mail belongs in ${dest}, take the sender out of that rule first (rules update), then file again. Otherwise file it to that folder.`
+    )
+  }
+
+  let ruleName = 'unchanged'
+  if (add.size) {
+    const entries = [...add.values()].map((s) => ({ emailAddress: { name: s.name || s.address, address: s.address } }))
+    const target = all
+      .filter((r) => isSenderRule(r) && normFolder(folderOf(r)) === normFolder(dest))
+      .sort(
+        (x, y) =>
+          Number(SENDERS_RULE.test(y.displayName ?? '')) - Number(SENDERS_RULE.test(x.displayName ?? '')) ||
+          (x.sequence ?? 0) - (y.sequence ?? 0)
+      )[0]
+    if (target) {
+      await graphRequest(account, 'PATCH', `${RULES_PATH}/${encodeURIComponent(target.id)}`, {
+        conditions: { fromAddresses: [...target.conditions.fromAddresses, ...entries] }
+      })
+      ruleName = target.displayName
+    } else {
+      ruleName = `${dest.split('/').pop()} (senders)`
+      await graphRequest(account, 'POST', RULES_PATH, {
+        displayName: ruleName,
+        sequence: all.reduce((m, r) => Math.max(m, r.sequence ?? 0), 0) + 1,
+        isEnabled: true,
+        conditions: { fromAddresses: entries },
+        actions: { moveToFolder: await resolveFolderId(account, dest), stopProcessingRules: true }
+      })
+    }
+  }
+  const moved = await moveEmails(account, uids, input.folder, dest)
+  return {
+    action: 'file',
+    account: account.email,
+    from_folder: input.folder,
+    to_folder: dest,
+    moved: moved.moved,
+    rule: ruleName,
+    senders_added: [...add.values()].map((s) => s.address),
+    already_in_rule: [...senders.values()]
+      .map((s) => s.address)
+      .filter((a, i, l) => already.has(a.toLowerCase()) && l.indexOf(a) === i)
+  }
 }

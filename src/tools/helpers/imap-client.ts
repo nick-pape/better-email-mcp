@@ -616,6 +616,31 @@ export async function moveEmails(
 }
 
 /**
+ * The From address of each UID (pape-house fork, for rules `file`). UIDs that
+ * aren't in the folder are absent from the map.
+ */
+export async function fetchSenders(
+  account: AccountConfig,
+  uids: number[],
+  folder: string
+): Promise<Map<number, { address: string; name: string }>> {
+  return withConnection(account, async (client) => {
+    const lock = await client.getMailboxLock(folder)
+    try {
+      const msgs = await client.fetchAll(uids, { uid: true, envelope: true }, { uid: true })
+      const out = new Map<number, { address: string; name: string }>()
+      for (const m of msgs as any[]) {
+        const f = m.envelope?.from?.[0]
+        if (f?.address) out.set(m.uid, { address: f.address, name: f.name || '' })
+      }
+      return out
+    } finally {
+      lock.release()
+    }
+  })
+}
+
+/**
  * Move every message matching an IMAP query (pape-house fork).
  * Capped at `limit` (newest first) so one call can't sweep a whole mailbox
  * by accident; call again to continue.

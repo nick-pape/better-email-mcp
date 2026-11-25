@@ -241,7 +241,7 @@ const TOOLS = [
   {
     name: 'rules',
     description:
-      'Server-side Outlook inbox rules (Microsoft Graph messageRules). Rules run inside Outlook even when no agent is running.\n\nActions (required params -> optional):\n- list (-> account): all rules in order, folder actions shown as folder paths\n- create (rule -> account): rule = {displayName, conditions, actions, exceptions?, sequence?, isEnabled?}\n- update (rule_id, rule, expected_folder -> account): partial update\n- delete (rule_id, expected_folder -> account)\nexpected_folder: the folder the rule moves mail to TODAY (as list shows it), or "none". Refused on a mismatch, so a mistyped rule_id cannot hit the wrong rule.\n\nconditions/exceptions use Graph messageRulePredicates, e.g. {"senderContains": ["@amazon.com"]}, {"subjectContains": ["receipt"]}, {"fromAddresses": [{"emailAddress": {"address": "a@b.com"}}]}.\nactions: moveToFolder / copyToFolder take a folder PATH (e.g. "Receipts/Amazon"; create it first with folders create), plus markAsRead, markImportance, assignCategories, stopProcessingRules. Deleting or forwarding actions are refused.\nRequires a one-time Graph sign-in (config graph_auth_start).',
+      'Server-side Outlook inbox rules (Microsoft Graph messageRules). Rules run inside Outlook even when no agent is running.\n\nActions (required params -> optional):\n- list (-> account): all rules in order, folder actions shown as folder paths\n- create (rule -> account): rule = {displayName, conditions, actions, exceptions?, sequence?, isEnabled?}\n- update (rule_id, rule, expected_folder -> account): partial update\n- delete (rule_id, expected_folder -> account)\n- file (folder, uid|uids, destination -> account): add each sender to the destination\'s "(senders)" rule (created if missing), then move the messages. Refused, nothing changed, if a sender is in another folder\'s rule.\nA rule\'s conditions all have to match: never put senderContains and fromAddresses in one rule (refused).\nexpected_folder: the folder the rule moves mail to TODAY (as list shows it), or "none". Refused on a mismatch, so a mistyped rule_id cannot hit the wrong rule.\n\nconditions/exceptions use Graph messageRulePredicates, e.g. {"senderContains": ["@amazon.com"]}, {"subjectContains": ["receipt"]}, {"fromAddresses": [{"emailAddress": {"address": "a@b.com"}}]}.\nactions: moveToFolder / copyToFolder take a folder PATH (e.g. "Receipts/Amazon"; create it first with folders create), plus markAsRead, markImportance, assignCategories, stopProcessingRules. Deleting or forwarding actions are refused.\nRequires a one-time Graph sign-in (config graph_auth_start).',
     annotations: {
       title: 'Rules',
       readOnlyHint: false,
@@ -252,7 +252,15 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'create', 'update', 'delete'], description: 'Action to perform' },
+        action: {
+          type: 'string',
+          enum: ['list', 'create', 'update', 'delete', 'file'],
+          description: 'Action to perform'
+        },
+        folder: { type: 'string', description: 'file: the folder the uid(s) are in now' },
+        uid: { type: 'number', description: 'file: one message' },
+        uids: { type: 'array', items: { type: 'number' }, description: 'file: several messages' },
+        destination: { type: 'string', description: 'file: the folder they belong in' },
         account: { type: 'string', description: 'Account email (optional with a single account)' },
         rule_id: { type: 'string', description: 'Rule id from list (update/delete)' },
         expected_folder: {
